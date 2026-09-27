@@ -1,0 +1,58 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*
+!.env.example
+.venv/
+runtime/
+.cache/
+.pytest_cache/
+.ruff_cache/
+*.log
+calendar_token.json
+*service*account*.json
+credentials*.json
+token.json
+requirements.lock.txt
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data (optional - uncomment if you don't want to commit data files)
+# data/
+# cleaned_data/
+# chunks/
+# vector_db/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / credentials
+service_account.json
+client_secret*.json
+
+# Test / tooling artifacts
+.playwright-mcp/
+*.png
+scratchpad/
+
+sampleimages/
+/*.jpeg
+
