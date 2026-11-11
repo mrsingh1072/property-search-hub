@@ -1,0 +1,2 @@
+# Compatibility alias: Patna conversion and validation use runtime dependencies.
+-r requirements.txt
