@@ -1,11 +1,8 @@
 """
 Unified LLM client with automatic fallback.
 
-Primary:  Google Gemini Flash (free tier: ~1,500 req/day, 1M tokens/min) — smartest,
-          and its huge token-per-minute limit avoids the rate-limit (429) problems
-          we hit with Groq's small free quota.
-Fallback: Groq Llama-3.3-70B (free, fast) — used when GEMINI_API_KEY is unset, or when
-          Gemini errors / is rate-limited.
+Primary: Google Gemini Flash, with Groq and OpenRouter as configured fallbacks.
+Model availability and quotas depend on the provider account.
 
 Both call sites (intent extraction + chat generation) go through complete().
 Gemini is called over plain REST (requests) so there is no extra SDK dependency to
@@ -13,7 +10,7 @@ break — the API key is the only thing needed.
 
 Env:
   GEMINI_API_KEY   free key from https://aistudio.google.com/apikey (optional)
-  GEMINI_MODEL     default "gemini-2.5-flash"
+  GEMINI_MODEL     default "gemini-3.5-flash-lite"
   GROQ_API_KEY     existing
   GROQ_MODEL       default "llama-3.3-70b-versatile"
 """
@@ -24,7 +21,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
 
@@ -112,11 +109,16 @@ def _gemini_complete(messages, temperature, max_tokens, json_mode, key) -> str:
     gen_cfg = {
         "temperature": temperature,
         "maxOutputTokens": max_tokens,
-        # Disable "thinking" — for intent extraction + short chat replies it only burns
-        # the output-token budget (and can yield an empty response). Ignored by models
-        # that don't support it.
-        "thinkingConfig": {"thinkingBudget": 0},
     }
+    if GEMINI_MODEL.startswith("gemini-2.5-flash"):
+        gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}
+    elif "flash-lite" in GEMINI_MODEL:
+        gen_cfg["thinkingConfig"] = {"thinkingLevel": "MINIMAL"}
+        gen_cfg["maxOutputTokens"] = max(max_tokens, 512)
+    else:
+        # Current Flash models use thinking levels and count thinking in the output cap.
+        gen_cfg["thinkingConfig"] = {"thinkingLevel": "LOW"}
+        gen_cfg["maxOutputTokens"] = max(max_tokens, 1024)
     if json_mode:
         gen_cfg["responseMimeType"] = "application/json"
 
@@ -128,15 +130,17 @@ def _gemini_complete(messages, temperature, max_tokens, json_mode, key) -> str:
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{GEMINI_MODEL}:generateContent"
     )
-    resp = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=30)
+    resp = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=(10, 45))
     resp.raise_for_status()
     data = resp.json()
 
     candidates = data.get("candidates") or []
     if not candidates:
         raise RuntimeError(f"Gemini returned no candidates: {str(data)[:160]}")
+    if candidates[0].get("finishReason") not in (None, "STOP"):
+        raise RuntimeError("Gemini returned an incomplete or blocked response")
     parts = candidates[0].get("content", {}).get("parts") or []
-    text = "".join(p.get("text", "") for p in parts).strip()
+    text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
     if not text:
         raise RuntimeError("Gemini returned empty text")
     return text

@@ -71,7 +71,8 @@ Account quotas, model availability and billing depend on the provider.
 | Groq | [Groq Console](https://console.groq.com/keys) | `GROQ_API_KEY` |
 | OpenRouter | [OpenRouter](https://openrouter.ai/settings/keys) | `OPENROUTER_API_KEY` |
 
-Model IDs are configurable through `GEMINI_MODEL`, `GROQ_MODEL`, and
+The Gemini default is `gemini-3.5-flash-lite`, using minimal thinking for quick
+chat and structured extraction. Model IDs are configurable through `GEMINI_MODEL`, `GROQ_MODEL`, and
 `OPENROUTER_MODEL`. The inherited model defaults are examples; select a currently
 available model in your account if a provider reports that a model is unavailable.
 The app uses Gemini's generateContent REST endpoint, Groq's chat SDK, and
