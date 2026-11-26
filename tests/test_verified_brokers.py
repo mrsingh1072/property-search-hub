@@ -1,5 +1,6 @@
 """Broker access regression tests using an isolated database and Auth adapter."""
 import copy
+import time
 import os
 import unittest
 from types import SimpleNamespace as NS
@@ -84,17 +85,21 @@ class VerifiedBrokerTests(unittest.TestCase):
         self.db.rows['sessions'] = [{'session_id': 'session-' + b} for b in ('a', 'b')]
         self.auth = NS(auth=NS(get_user=Mock(side_effect=self.get_user),
             sign_in_with_password=Mock(return_value=NS(user=NS(id='user-a'), session=NS(access_token=self.token('a'))))))
-        for target, value in [('database.supabase_client.get_service_client', self.db), ('api.staff_auth.auth_client', self.auth)]:
+        for target, value in [('database.supabase_client.get_service_client', self.db)]:
             p = patch(target, return_value=value); p.start(); self.addCleanup(p.stop)
         p = patch.dict(os.environ, {'ADMIN_USERNAME': 'owner', 'ADMIN_PASSWORD': 'owner-password-for-test',
                                    'ADMIN_SESSION_SECRET': 'admin-signing-key-for-tests-only-123456789'})
         p.start(); self.addCleanup(p.stop)
         staff_auth._ATTEMPTS.clear()
+        from api import auth
+        auth._otp_store.clear(); auth._otp_attempts.clear(); auth._otp_last_sent.clear()
+        sender = patch('notifications.email_notifier._send', return_value=True)
+        sender.start(); self.addCleanup(sender.stop)
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
         self.principal = StaffPrincipal('broker', broker_id='a', user_id='user-a', name='Broker a', phone='9876543210')
         self.scoped = ScopedClient(self.db, self.principal)
-    def token(self, broker): return jwt.encode({'sub': 'user-' + broker, 'aud': 'authenticated'}, 'fake-provider-signing-key-123456789', algorithm='HS256')
+    def token(self, broker): return jwt.encode({'sub': 'user-' + broker, 'broker_id':broker, 'role':'broker', 'aud': 'apnaghar-broker', 'exp':int(time.time())+3600}, 'admin-signing-key-for-tests-only-123456789', algorithm='HS256')
     def get_user(self, token):
         for broker in ('a', 'b'):
             if token == self.token(broker): return NS(user=NS(id='user-' + broker))
@@ -103,9 +108,9 @@ class VerifiedBrokerTests(unittest.TestCase):
     def admin_headers(self): return {'Authorization': 'Bearer ' + staff_auth.admin_sign_in('owner', 'owner-password-for-test')}
     def application(self):
         return {'name': 'New Broker', 'email': 'new@example.invalid', 'phone': '9876543299',
-                'password': 'applicant-password-for-test', 'areas': ['Boring Road']}
+                'areas': ['Boring Road']}
 
-    def test_application_always_pending_and_password_only_in_auth(self):
+    def test_application_is_passwordless_and_always_pending(self):
         payload = {**self.application(), 'approval_status': 'approved', 'is_active': True, 'role': 'admin'}
         response = self.client.post('/broker/apply', json=payload)
         self.assertEqual(response.status_code, 201, response.text)
@@ -113,6 +118,7 @@ class VerifiedBrokerTests(unittest.TestCase):
         self.assertEqual(row['approval_status'], 'pending'); self.assertFalse(row['is_active'])
         self.assertNotIn('password', row); self.assertNotIn('password', response.text)
         self.assertFalse(self.db.auth.admin.create_user.call_args.args[0]['email_confirm'])
+        self.assertNotIn('password', self.db.auth.admin.create_user.call_args.args[0])
     def test_application_rollback_deletes_only_new_auth_user(self):
         self.db.fail_insert = True
         self.assertEqual(self.client.post('/broker/apply', json=self.application()).status_code, 400)
@@ -124,11 +130,14 @@ class VerifiedBrokerTests(unittest.TestCase):
     def test_unapproved_states_block_sign_in_and_existing_sessions(self):
         for status in ('pending', 'rejected', 'suspended'):
             self.db.rows['brokers'][0].update(approval_status=status, is_active=False)
-            self.assertEqual(self.client.post('/broker/auth', json={'email':'a@example.invalid','password':'test'}).status_code, 403)
+            self.assertEqual(self.client.post('/broker/auth', json={'email':'a@example.invalid','code':'123456'}).status_code, 403)
             self.assertEqual(self.client.get('/broker/me', headers=self.headers()).status_code, 403)
         self.auth.auth.sign_in_with_password.assert_not_called()
     def test_approved_login_sets_http_only_cookie(self):
-        response = self.client.post('/broker/auth', json={'email':'a@example.invalid','password':'test'})
+        from api import auth
+        self.assertEqual(self.client.post('/broker/otp/request',json={'email':'a@example.invalid'}).status_code,200)
+        code=auth._otp_store['broker:a@example.invalid'][0]
+        response = self.client.post('/broker/auth', json={'email':'a@example.invalid','code':code})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn('HttpOnly', response.headers['set-cookie'])
         self.assertIn('SameSite=strict', response.headers['set-cookie'])
@@ -272,6 +281,73 @@ class VerifiedBrokerTests(unittest.TestCase):
             response=self.client.post('/broker/properties/properties-a/update',headers=self.headers(),json={'price_inr':6000000})
         self.assertEqual(response.status_code,200,response.text)
         update.assert_called_once()
+
+    def test_customer_code_cannot_sign_in_broker(self):
+        from api import auth
+        self.assertEqual(self.client.post('/auth/otp/request',json={'email':'a@example.invalid'}).status_code,200)
+        code=auth._otp_store['a@example.invalid'][0]
+        response=self.client.post('/broker/otp/verify',json={'email':'a@example.invalid','code':code})
+        self.assertEqual(response.status_code,401)
+    def test_broker_code_cannot_sign_in_customer(self):
+        from api import auth
+        self.assertEqual(self.client.post('/broker/otp/request',json={'email':'a@example.invalid'}).status_code,200)
+        code=auth._otp_store['broker:a@example.invalid'][0]
+        response=self.client.post('/auth/otp/verify',json={'email':'a@example.invalid','code':code})
+        self.assertEqual(response.status_code,401)
+    def test_code_cannot_bypass_admin_approval_after_suspension(self):
+        from api import auth
+        self.client.post('/broker/otp/request',json={'email':'a@example.invalid'})
+        code=auth._otp_store['broker:a@example.invalid'][0]
+        self.db.rows['brokers'][0].update(approval_status='suspended',is_active=False)
+        response=self.client.post('/broker/otp/verify',json={'email':'a@example.invalid','code':code})
+        self.assertEqual(response.status_code,403)
+    def test_pending_broker_cannot_request_code(self):
+        self.db.rows['brokers'][0].update(approval_status='pending',is_active=False)
+        with patch('notifications.email_notifier._send') as send:
+            self.assertEqual(self.client.post('/broker/otp/request',json={'email':'a@example.invalid'}).status_code,403)
+        send.assert_not_called()
+    def test_code_is_single_use_for_broker_login(self):
+        from api import auth
+        self.client.post('/broker/otp/request',json={'email':'a@example.invalid'})
+        code=auth._otp_store['broker:a@example.invalid'][0]
+        payload={'email':'a@example.invalid','code':code}
+        response=self.client.post('/broker/otp/verify',json=payload)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(self.client.post('/broker/otp/verify',json=payload).status_code,401)
+    def test_password_login_is_no_longer_accepted(self):
+        self.assertEqual(self.client.post('/broker/auth',json={'email':'a@example.invalid','password':'old-password'}).status_code,422)
+        token=jwt.encode({'sub':'user-a','aud':'authenticated'},'legacy-supabase-signing-key-123456789',algorithm='HS256')
+        self.assertEqual(self.client.get('/broker/me',headers={'Authorization':'Bearer '+token}).status_code,401)
+    def test_customer_email_code_returns_customer_session(self):
+        from api import auth
+        self.client.post('/auth/otp/request',json={'email':'buyer@example.invalid'})
+        code=auth._otp_store['buyer@example.invalid'][0]
+        with patch('api.auth.get_or_create_customer',return_value={'id':'customer-1','email':'buyer@example.invalid'}):
+            response=self.client.post('/auth/otp/verify',json={'email':' BUYER@example.invalid ','code':code})
+        self.assertEqual(response.status_code,200,response.text)
+        token=response.json()['token']
+        self.assertEqual(auth.verify_jwt(token)['sub'],'customer-1')
+        self.assertEqual(self.client.get('/broker/me',headers={'Authorization':'Bearer '+token}).status_code,401)
+        self.assertEqual(self.client.post('/auth/otp/verify',json={'email':'buyer@example.invalid','code':code}).status_code,401)
+    def test_delivery_failure_is_reported_for_both_login_pages(self):
+        with patch('notifications.email_notifier._send',return_value=False):
+            for endpoint,email in [('/auth/otp/request','buyer@example.invalid'),('/broker/otp/request','a@example.invalid')]:
+                response=self.client.post(endpoint,json={'email':email})
+                self.assertEqual(response.status_code,503,response.text)
+                self.assertNotIn('token',response.json())
+    def test_broker_token_cannot_be_customer_or_admin_token(self):
+        from api import auth
+        self.assertIsNone(auth.verify_jwt(self.token('a')))
+        forged=jwt.encode({'sub':'user-a','broker_id':'a','role':'admin','aud':'apnaghar-broker','exp':int(time.time())+60},os.environ['ADMIN_SESSION_SECRET'],algorithm='HS256')
+        self.assertEqual(self.client.get('/admin/brokers',headers={'Authorization':'Bearer '+forged}).status_code,401)
+    def test_code_pages_share_design_and_have_no_broker_password(self):
+        from pathlib import Path
+        buyer=Path('api/templates/login.html').read_text(encoding='utf-8')
+        broker=Path('api/templates/broker_login.html').read_text(encoding='utf-8')
+        self.assertEqual(buyer.split('<style>')[1].split('</style>')[0],broker.split('<style>')[1].split('</style>')[0])
+        for text in (broker,Path('api/templates/broker_apply.html').read_text(encoding='utf-8')):
+            self.assertNotIn('type="password"',text)
+        self.assertEqual(self.client.get('/static/email-login.js').status_code,200)
 
     def test_admin_listing_filters_and_safe_profiles(self):
         response = self.client.get('/admin/brokers?status=approved', headers=self.admin_headers())

@@ -12,19 +12,38 @@ immediately; properties do not enter an approval queue.
 3. Restart the server. Open `/admin/login` and use `ADMIN_USERNAME` and
    `ADMIN_PASSWORD` from your local `.env`. Keep these values private.
 4. Open `/broker/apply` and submit the broker's real name, email, Indian phone,
-   password, agency and verification reference. Broker passwords stay in Supabase
-   Auth; they do not belong in `.env` or the public broker table.
+   agency and verification reference. No broker password is required.
 5. At `/admin`, inspect the application and verify identity, contact ownership
    and business details through your own verification process. Only then approve
    the broker. The application itself is not proof of identity.
-6. The broker signs in at `/broker/login` with their own email/password. They can
+6. The broker signs in at `/broker/login` with a one-time code sent to their approved email address. They can
    add a property, upload a CSV, and manage their own listings, leads and visits.
 
-Registration creates an unconfirmed Supabase Auth user and a pending, inactive
-broker record. It sends no confirmation email. Admin approval confirms the Auth
-email and activates the broker through an audited database operation. Configure
-Supabase password reset separately before onboarding production users; an in-app
-forgot-password flow is not included in this phase.
+Registration creates a passwordless Supabase Auth identity and a pending,
+inactive broker record. It sends no email. Admin approval activates the broker
+through an audited database operation. Sign-in then requires a six-digit code
+sent through the same Gmail SMTP configuration used for buyer codes.
+
+Configure `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` in local `.env`. Enable Google
+2-Step Verification and create an app password at
+[Google App passwords](https://myaccount.google.com/apppasswords).
+Use the generated app password rather than your Google account password.
+See [Google's instructions](https://support.google.com/accounts/answer/185833).
+Restart the server after editing settings.
+
+Codes expire after 10 minutes, work once, and are invalidated after five wrong
+attempts. Resend has a 60-second cooldown, and endpoints also limit requests per
+IP. Buyer and broker codes are isolated. Email delivery failures never issue a
+session. Existing approved brokers can use email codes without reapplying.
+Existing password-based broker sessions must sign in again with a code.
+
+Broker sessions are server-signed, expire after one hour, and check the linked
+broker's current approval on every private request. They have a separate audience
+from both customer and admin sessions. Admin credentials remain local.
+
+The code store is process-local: run one Uvicorn worker for this local setup.
+Restarting the app invalidates pending codes. Before scaling to multiple workers
+or hosts, replace the store and rate limits with shared persistent storage.
 
 ## Admin account
 

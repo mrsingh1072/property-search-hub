@@ -32,7 +32,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager, suppress
 
@@ -247,11 +247,11 @@ async def get_shortlist(session_id: str):
 # ── Customer auth (email OTP + Google) ────────────────────────────────────────
 
 class OtpRequest(BaseModel):
-    email: str
+    email: str = Field(min_length=5, max_length=254)
 
 class OtpVerify(BaseModel):
-    email: str
-    code: str
+    email: str = Field(min_length=5, max_length=254)
+    code: str = Field(min_length=1, max_length=6)
 
 class GoogleAuth(BaseModel):
     credential: str
@@ -275,13 +275,21 @@ async def auth_config():
 
 
 @app.post("/auth/otp/request")
-async def auth_otp_request(req: OtpRequest):
-    from api.auth import request_otp
-    return {"ok": request_otp(req.email)}
+def auth_otp_request(req: OtpRequest, request: Request):
+    from api.auth import request_otp, normalize_email
+    from api.staff_auth import rate_limit
+    rate_limit(request, 'customer-code-request')
+    if not normalize_email(req.email):
+        raise HTTPException(400, 'Enter a valid email')
+    if not request_otp(req.email):
+        raise HTTPException(503, 'Could not send the code. Wait 60 seconds before retrying. Email delivery must be configured by admin.')
+    return {"ok": True}
 
 
 @app.post("/auth/otp/verify")
-async def auth_otp_verify(req: OtpVerify):
+def auth_otp_verify(req: OtpVerify, request: Request):
+    from api.staff_auth import rate_limit
+    rate_limit(request, 'customer-code-verify')
     from api.auth import verify_otp, get_or_create_customer, issue_jwt
     if not verify_otp(req.email, req.code):
         raise HTTPException(status_code=401, detail="Invalid or expired code")
@@ -993,6 +1001,12 @@ loadImgs();
 # ── Simple web chat interface ─────────────────────────────────────────────────
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+@app.get("/static/email-login.js")
+async def email_login_script():
+    return Response((Path(__file__).parent / "static" / "email_login.js").read_text(encoding="utf-8"),
+                    media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
 
 @app.get("/static/shared.css")
 async def shared_css():

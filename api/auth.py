@@ -17,6 +17,9 @@ import os
 import time
 import secrets
 import logging
+import re
+import hmac
+from threading import RLock
 from datetime import datetime, timedelta, timezone
 
 import jwt  # PyJWT
@@ -33,6 +36,8 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
 # In-memory OTP store (single uvicorn worker): email -> (code, expires_at)
 _otp_store: dict[str, tuple[str, float]] = {}
 _otp_attempts: dict[str, int] = {}   # email -> wrong-code attempts (brute-force guard)
+_otp_last_sent: dict[str, float] = {}
+_otp_lock = RLock()
 _OTP_TTL = 600       # 10 minutes
 _OTP_MAX_TRIES = 5   # lock the code after this many wrong guesses
 
@@ -63,52 +68,85 @@ def verify_jwt(token: str) -> dict | None:
 
 # ── Email OTP ─────────────────────────────────────────────────────────────────
 
-def request_otp(email: str) -> bool:
-    email = (email or "").strip().lower()
-    if "@" not in email:
+def normalize_email(email: str) -> str:
+    email = (email or '').strip().lower()
+    if len(email) > 254 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+        return ''
+    return email
+
+
+def otp_key(email, purpose):
+    if purpose not in {'customer', 'broker'}:
+        raise ValueError('Unknown login purpose')
+    return email if purpose == 'customer' else 'broker:' + email
+
+
+def request_otp(email: str, purpose: str = 'customer') -> bool:
+    email = normalize_email(email)
+    if not email:
         return False
-    previous = _otp_store.get(email)
-    if previous and previous[1] - _OTP_TTL + 60 > time.time():
-        return False
+    key, now = otp_key(email, purpose), time.time()
+    with _otp_lock:
+        # Keep the resend delay even after a code has been consumed.
+        for old in list(_otp_last_sent):
+            if now - _otp_last_sent[old] > _OTP_TTL:
+                _otp_last_sent.pop(old, None)
+                _otp_store.pop(old, None)
+                _otp_attempts.pop(old, None)
+        if now - _otp_last_sent.get(key, 0) < 60:
+            return False
+        _otp_last_sent[key] = now
+        # A new request replaces the previous code; a failed send grants no code.
+        _otp_store.pop(key, None)
+        _otp_attempts.pop(key, None)
     code = f"{secrets.randbelow(1000000):06d}"
+    sent = False
     try:
         from notifications.email_notifier import _send
+        label = 'broker sign-in' if purpose == 'broker' else 'sign-in'
         html = (f"<div style='font-family:sans-serif'><p>Hi,</p>"
-                f"<p>Your ApnaGhar login code is:</p>"
+                f"<p>Your ApnaGhar {label} code is:</p>"
                 f"<p style='font-size:28px;font-weight:700;letter-spacing:4px'>{code}</p>"
-                f"<p style='color:#666'>It's valid for 10 minutes. If you didn't request this, ignore it.</p>"
-                f"<p>— ApnaGhar, your property assistant 🏠</p></div>")
-        if not _send(email, "Your ApnaGhar login code", html, f"Your ApnaGhar login code is {code} (valid 10 minutes)."):
+                f"<p>Valid for 10 minutes. Never share this code. "
+                f"If you did not request it, ignore this email.</p></div>")
+        sent = _send(email, f"Your ApnaGhar {label} code", html,
+                     f"Your ApnaGhar {label} code is {code} (valid 10 minutes). Never share it.")
+    except Exception:
+        logger.error('OTP email delivery failed')
+    with _otp_lock:
+        if sent:
+            _otp_store[key] = (code, time.time() + _OTP_TTL)
+            _otp_attempts[key] = 0
+        else:
+            _otp_last_sent.pop(key, None)
+    return bool(sent)
+
+
+def verify_otp(email: str, code: str, purpose: str = 'customer') -> bool:
+    email = normalize_email(email)
+    if not email:
+        return False
+    key = otp_key(email, purpose)
+    with _otp_lock:
+        rec = _otp_store.get(key)
+        if not rec:
             return False
-        _otp_store[email] = (code, time.time() + _OTP_TTL)
-        _otp_attempts[email] = 0
+        real, exp = rec
+        if time.time() >= exp or _otp_attempts.get(key, 0) >= _OTP_MAX_TRIES:
+            _otp_store.pop(key, None)
+            _otp_attempts.pop(key, None)
+            return False
+        supplied = (code or '').strip()
+        if not re.fullmatch(r'[0-9]{6}', supplied) or not hmac.compare_digest(supplied, real):
+            attempts = _otp_attempts.get(key, 0) + 1
+            _otp_attempts[key] = attempts
+            if attempts >= _OTP_MAX_TRIES:
+                _otp_store.pop(key, None)
+                _otp_attempts.pop(key, None)
+            return False
+        _otp_store.pop(key, None)
+        _otp_attempts.pop(key, None)
         return True
-    except Exception as e:
-        logger.error(f"OTP email failed: {e}")
-        return False
-
-
-def verify_otp(email: str, code: str) -> bool:
-    email = (email or "").strip().lower()
-    rec = _otp_store.get(email)
-    if not rec:
-        return False
-    real, exp = rec
-    if time.time() > exp:
-        _otp_store.pop(email, None)
-        _otp_attempts.pop(email, None)
-        return False
-    # Brute-force guard: invalidate the code after too many wrong guesses.
-    if _otp_attempts.get(email, 0) >= _OTP_MAX_TRIES:
-        _otp_store.pop(email, None)
-        _otp_attempts.pop(email, None)
-        return False
-    if (code or "").strip() != real:
-        _otp_attempts[email] = _otp_attempts.get(email, 0) + 1
-        return False
-    _otp_store.pop(email, None)  # single-use
-    _otp_attempts.pop(email, None)
-    return True
 
 
 # ── Google Identity ───────────────────────────────────────────────────────────
@@ -121,11 +159,11 @@ def verify_google(credential: str) -> dict | None:
         from google.oauth2 import id_token as gid_token
         from google.auth.transport import requests as g_requests
         info = gid_token.verify_oauth2_token(credential, g_requests.Request(), GOOGLE_CLIENT_ID)
-        if not info.get("email_verified", True):
+        if info.get("email_verified") is not True or not info.get("sub") or not normalize_email(info.get("email")):
             return None
-        return {"email": info["email"], "name": info.get("name"), "sub": info.get("sub")}
+        return {"email": normalize_email(info["email"]), "name": info.get("name"), "sub": info["sub"]}
     except Exception as e:
-        logger.warning(f"Google token verify failed: {e}")
+        logger.warning("Google token verification failed")
         return None
 
 

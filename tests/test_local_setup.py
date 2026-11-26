@@ -18,6 +18,9 @@ class LocalSetupTests(unittest.TestCase):
         self.client = TestClient(app)
         auth._otp_store.clear()
         auth._otp_attempts.clear()
+        auth._otp_last_sent.clear()
+        from api.staff_auth import _ATTEMPTS
+        _ATTEMPTS.clear()
 
     def tearDown(self):
         self.env.stop()

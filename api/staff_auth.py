@@ -9,7 +9,6 @@ from threading import Lock
 
 import jwt
 from fastapi import HTTPException
-from supabase import create_client
 from database.staff_scope import StaffPrincipal, current_staff
 
 COOKIE_NAME = 'apnaghar_staff'
@@ -20,15 +19,6 @@ _ATTEMPT_LOCK = Lock()
 def service_client():
     from database.supabase_client import get_service_client
     return get_service_client()
-
-
-def auth_client():
-    # A separate client prevents sign-in from changing the shared service-role session.
-    url = os.environ.get('SUPABASE_URL')
-    key = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
-    if not url or not key:
-        raise HTTPException(503, 'Account services are not configured')
-    return create_client(url, key)
 
 
 def rate_limit(request, action, maximum=10):
@@ -84,21 +74,32 @@ def authenticate_token(token):
             return StaffPrincipal(role='admin', name=username)
         except Exception:
             raise HTTPException(401, 'Admin session expired. Please sign in again.')
+    if audience != 'apnaghar-broker':
+        raise HTTPException(401, 'Please sign in with an email code')
     try:
-        user = auth_client().auth.get_user(token).user
-        if not user:
-            raise ValueError('Missing user')
+        claims = jwt.decode(token, admin_settings()[2], algorithms=['HS256'], audience='apnaghar-broker',
+                            options={'require': ['sub', 'exp', 'role', 'broker_id']})
+        if claims['role'] != 'broker':
+            raise ValueError('Invalid broker role')
     except Exception:
         raise HTTPException(401, 'Broker session expired. Please sign in again.')
     try:
-        rows = service_client().table('brokers').select('*').eq('auth_user_id', str(user.id)).limit(1).execute().data or []
+        rows = (service_client().table('brokers').select('*').eq('auth_user_id', claims['sub'])
+                .eq('id', claims['broker_id']).limit(1).execute().data or [])
     except Exception:
         raise HTTPException(503, 'Broker account setup is unavailable. Apply migration 007.')
     if not rows or rows[0].get('approval_status') != 'approved' or not rows[0].get('is_active'):
         raise HTTPException(403, 'Broker access requires current ApnaGhar admin approval')
     broker = rows[0]
-    return StaffPrincipal(role='broker', broker_id=broker['id'], user_id=str(user.id),
+    return StaffPrincipal(role='broker', broker_id=broker['id'], user_id=claims['sub'],
                           name=broker['name'], email=broker.get('email') or '', phone=broker.get('phone') or '')
+
+
+def issue_broker_session(broker):
+    now = datetime.now(timezone.utc)
+    return jwt.encode({'sub': broker['auth_user_id'], 'broker_id': broker['id'],
+                       'role': 'broker', 'aud': 'apnaghar-broker', 'iat': now,
+                       'exp': now + timedelta(hours=1)}, admin_settings()[2], algorithm='HS256')
 
 
 def require_staff_token(token=None):

@@ -20,7 +20,6 @@ class BrokerApplication(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=5, max_length=254)
     phone: str = Field(min_length=10, max_length=20)
-    password: str = Field(min_length=12, max_length=128)
     agency: str = Field(default='', max_length=160)
     verification_reference: str = Field(default='', max_length=200)
     areas: list[str] = Field(default_factory=list, max_length=30)
@@ -76,8 +75,7 @@ def apply_broker(payload: BrokerApplication, request: Request):
     user_id = None
     try:
         # No email is sent here. Admin verifies the applicant before confirming access.
-        user = client.auth.admin.create_user({'email': email, 'password': payload.password,
-                                              'email_confirm': False}).user
+        user = client.auth.admin.create_user({'email': email, 'email_confirm': False}).user
         if not user:
             raise ValueError('Account was not created')
         user_id = str(user.id)
@@ -97,26 +95,50 @@ def apply_broker(payload: BrokerApplication, request: Request):
     return {'ok': True, 'status': 'pending', 'message': 'Application submitted. ApnaGhar admin must verify and approve your account before you can sign in.'}
 
 
-@router.post('/broker/auth')
-def broker_sign_in(payload: Credentials, request: Request, response: Response):
-    staff_auth.rate_limit(request, 'broker-login')
-    email = (payload.email or payload.username).strip().lower()
+class BrokerOtpRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+
+
+class BrokerOtpVerify(BrokerOtpRequest):
+    code: str = Field(min_length=1, max_length=6)
+
+
+def approved_account(email):
+    from api.auth import normalize_email
+    email = normalize_email(email)
+    if not email:
+        raise HTTPException(400, 'Enter a valid email')
     try:
         rows = staff_auth.service_client().table('brokers').select('*').eq('email', email).limit(1).execute().data or []
     except Exception:
         raise HTTPException(503, 'Broker login is unavailable. Check migration 007.')
     if not rows or not rows[0].get('auth_user_id'):
-        raise HTTPException(401, 'Invalid email or password')
+        raise HTTPException(403, 'An approved broker account is required. Apply or contact ApnaGhar admin.')
     broker = rows[0]
     if broker.get('approval_status') != 'approved' or not broker.get('is_active'):
         raise HTTPException(403, 'Your broker account is not currently approved. Contact ApnaGhar admin.')
-    try:
-        result = staff_auth.auth_client().auth.sign_in_with_password({'email': email, 'password': payload.password})
-        if not result.session or not result.user or str(result.user.id) != broker['auth_user_id']:
-            raise ValueError('Account mismatch')
-    except Exception:
-        raise HTTPException(401, 'Invalid email or password')
-    token = result.session.access_token
+    return broker
+
+
+@router.post('/broker/otp/request')
+def broker_request_code(payload: BrokerOtpRequest, request: Request):
+    from api.auth import request_otp
+    staff_auth.rate_limit(request, 'broker-code-request')
+    broker = approved_account(payload.email)
+    if not request_otp(broker['email'], purpose='broker'):
+        raise HTTPException(503, 'Could not send the code. Wait 60 seconds before retrying. Ask admin to check email delivery settings.')
+    return {'ok': True, 'message': 'Code sent. It expires in 10 minutes.'}
+
+
+@router.post('/broker/auth')
+@router.post('/broker/otp/verify')
+def broker_sign_in(payload: BrokerOtpVerify, request: Request, response: Response):
+    from api.auth import verify_otp
+    staff_auth.rate_limit(request, 'broker-code-verify')
+    broker = approved_account(payload.email)
+    if not verify_otp(broker['email'], payload.code, purpose='broker'):
+        raise HTTPException(401, 'Invalid or expired code. Request a new code after five unsuccessful attempts.')
+    token = staff_auth.issue_broker_session(broker)
     set_session(response, token)
     return {'token': token, 'role': 'broker', 'broker': public_profile(broker)}
 

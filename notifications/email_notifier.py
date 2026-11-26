@@ -73,7 +73,7 @@ def _send(to: str, subject: str, html_body: str, plain_body: str) -> bool:
     msg.attach(MIMEText(html_body, "html"))
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
             server.starttls()
             server.login(sender, password)
             server.sendmail(sender, to, msg.as_string())
@@ -114,7 +114,7 @@ def send_calendar_invite(to: str, subject: str, html_body: str, plain_body: str,
     msg.attach(ics_attach)
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
             server.starttls()
             server.login(sender, password)
             server.sendmail(sender, to, msg.as_string())

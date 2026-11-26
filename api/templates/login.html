@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="referrer" content="no-referrer-when-downgrade">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in — ApnaGhar</title>
 <link rel="preconnect" href="https://api.fontshare.com">
@@ -11,7 +12,7 @@
 :root{--ink:#12211b;--soft:#4a5a52;--paper:#f6f4ec;--paper2:#efece1;--emerald:#0f7a52;--emerald-dk:#0b5c3d;--emerald-lt:#e7f3ec;--line:#e3dfd2;}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'General Sans',system-ui,sans-serif;color:var(--ink);background:var(--paper);
-  min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;-webkit-font-smoothing:antialiased;position:relative;overflow:hidden}
+  min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;-webkit-font-smoothing:antialiased;position:relative;overflow-x:hidden;overflow-y:auto}
 body::before{content:'';position:absolute;top:-12%;left:-8%;width:46%;height:80%;background:radial-gradient(circle,rgba(15,122,82,.14),transparent 70%);pointer-events:none}
 body::after{content:'';position:absolute;bottom:-16%;right:-8%;width:46%;height:86%;background:radial-gradient(circle,rgba(200,137,42,.12),transparent 70%);pointer-events:none}
 .card{position:relative;z-index:1;width:100%;max-width:420px;background:#fff;border-radius:22px;
@@ -42,6 +43,7 @@ input:focus{border-color:var(--emerald);background:#fff;box-shadow:0 0 0 3px rgb
 .foot{margin-top:20px;text-align:center;font-size:13px;color:var(--soft)}
 .foot a{color:var(--emerald);font-weight:600;text-decoration:none}
 .skip{margin-top:8px}
+.text-button{border:0;background:none;color:var(--emerald);font:inherit;cursor:pointer;padding:4px}.text-button:disabled{color:var(--soft);cursor:default}
 </style>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -59,16 +61,17 @@ input:focus{border-color:var(--emerald);background:#fff;box-shadow:0 0 0 3px rgb
 
   <label for="email">Email</label>
   <div class="field"><i class="ph ph-envelope-simple"></i>
-    <input id="email" type="email" autocomplete="email" placeholder="you@example.com" autofocus></div>
+    <input id="email" type="email" autocomplete="email" maxlength="254" required placeholder="you@example.com" autofocus></div>
 
   <div id="otp-row" style="display:none">
     <label for="otp">Verification code</label>
     <div class="field"><i class="ph ph-shield-check"></i>
-      <input id="otp" inputmode="numeric" maxlength="6" placeholder="6-digit code"></div>
+      <input id="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="6-digit code"></div>
   </div>
 
   <button class="btn" id="go" onclick="loginAction()"><i class="ph ph-paper-plane-tilt"></i> Send code</button>
-  <p class="msg" id="msg"></p>
+  <p class="msg" id="msg" role="status" aria-live="polite"></p>
+  <div id="code-actions" class="foot" hidden><button type="button" id="resend" class="text-button">Resend code</button> · <button type="button" id="change-email" class="text-button">Change email</button></div>
   <div class="foot">
     <a href="/chat">Continue without signing in →</a>
     <div class="skip"><a href="/" style="color:var(--soft);font-weight:500">← Back to home</a></div>
@@ -77,7 +80,7 @@ input:focus{border-color:var(--emerald);background:#fff;box-shadow:0 0 0 3px rgb
 
 <script>
 var NEXT=new URLSearchParams(location.search).get('next')||'/chat';
-if(localStorage.getItem('riya_token')) location.replace(NEXT);
+if(!NEXT.startsWith('/')||NEXT.startsWith('//')||NEXT.includes('\\'))NEXT='/chat';
 
 function authHeaders(t){return t?{'Authorization':'Bearer '+t}:{};}
 async function onLoggedIn(token){
@@ -92,35 +95,9 @@ async function onLoggedIn(token){
   location.replace(NEXT);
 }
 
-var otpSent=false;
-async function loginAction(){
-  var email=document.getElementById('email').value.trim();
-  var msg=document.getElementById('msg'), go=document.getElementById('go');
-  if(!email.includes('@')){ msg.style.color='#c0492f'; msg.textContent='Enter a valid email.'; return; }
-  if(!otpSent){
-    go.disabled=true; msg.style.color='#4a5a52'; msg.textContent='Sending code…';
-    try{
-      var r=await fetch('/auth/otp/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email})});
-      go.disabled=false;
-      if((await r.json()).ok){ otpSent=true; document.getElementById('otp-row').style.display='';
-        go.innerHTML='<i class="ph ph-sign-in"></i> Verify & sign in'; msg.style.color='#0f7a52';
-        msg.textContent='Code sent to '+email+' — check your inbox.'; document.getElementById('otp').focus(); }
-      else { msg.style.color='#c0492f'; msg.textContent='Could not send code. Try again.'; }
-    }catch(e){ go.disabled=false; msg.style.color='#c0492f'; msg.textContent='Could not connect. Try again.'; }
-  } else {
-    var code=document.getElementById('otp').value.trim();
-    go.disabled=true; msg.style.color='#4a5a52'; msg.textContent='Verifying…';
-    try{
-      var r=await fetch('/auth/otp/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,code:code})});
-      go.disabled=false;
-      if(r.ok){ onLoggedIn((await r.json()).token); }
-      else { msg.style.color='#c0492f'; msg.textContent='Wrong or expired code.'; }
-    }catch(e){ go.disabled=false; msg.style.color='#c0492f'; msg.textContent='Could not connect. Try again.'; }
-  }
-}
-document.getElementById('otp').addEventListener('keydown',function(e){if(e.key==='Enter')loginAction();});
-document.getElementById('email').addEventListener('keydown',function(e){if(e.key==='Enter')loginAction();});
-
+</script>
+<script src="/static/email-login.js"></script>
+<script>
 async function handleGoogle(resp){
   var msg=document.getElementById('msg');
   try{

@@ -93,7 +93,7 @@ Follow [the Patna import guide](PATNA.md): fill
 broker dashboard CSV import. The upload validates, geocodes, embeds and stores
 the listings directly in Supabase. The first embedding downloads the model.
 
-Brokers register at `/broker/apply` with individual email/password and contact
+Brokers register at `/broker/apply` with individual email code and contact
 information. ApnaGhar admin verifies the broker through `/admin/login` and approves
 the application. Only approved brokers can sign in and add their own listings.
 Property publication does not require a second approval. See [BROKERS.md](BROKERS.md).
@@ -116,7 +116,7 @@ Open [the homepage](http://127.0.0.1:8000),
 [listings](http://127.0.0.1:8000/properties/browse), or
 [broker login](http://127.0.0.1:8000/broker/login).
 Admin signs in at `/admin/login` using `ADMIN_USERNAME` and `ADMIN_PASSWORD`
-from local `.env`. Brokers use their approved individual email/password. The API documentation is at
+from local `.env`. Brokers use their approved individual email code. The API documentation is at
 [Swagger UI](http://127.0.0.1:8000/docs).
 
 `/health` checks the server process. `/ready` checks configuration presence only;
@@ -135,7 +135,7 @@ email, WhatsApp, SMS or Telegram messages, and does not create meetings.
 | Feature | Required settings | Setup |
 | --- | --- | --- |
 | Email OTP and email notifications | `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD` | Enable Google 2-step verification and create an [app password](https://support.google.com/accounts/answer/185833). Use an app password, not your account password. |
-| Google login | `GOOGLE_OAUTH_CLIENT_ID` | Create a Web OAuth client and add `http://127.0.0.1:8000` as an authorized JavaScript origin. |
+| Google login | `GOOGLE_OAUTH_CLIENT_ID` | Create a Web OAuth client in Google Auth Platform. Add `http://localhost`, `http://localhost:8000` and `http://127.0.0.1:8000` as authorized JavaScript origins. Use the client ID, not the client secret. No redirect URI is used by this JavaScript callback flow. |
 | Telegram | `TELEGRAM_BOT_TOKEN` | Create your bot with [BotFather](https://t.me/BotFather), then run `.\.venv\Scripts\python.exe interfaces/telegram_bot.py` for local polling. Disable any existing webhook first. |
 | WhatsApp | `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` | Follow [Meta's setup guide](https://developers.facebook.com/docs/whatsapp/cloud-api/get-started). Add your own permitted test recipients. |
 | Broker WhatsApp | `BROKER_WHATSAPP_PHONE`, `WHATSAPP_BUSINESS_NUMBER` | Use your own broker and business numbers, with country code. The current routing assumes Indian phone numbers. |

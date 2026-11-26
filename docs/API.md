@@ -22,7 +22,9 @@ schema is at `/openapi.json`. The application source is `api/main.py`.
 | `POST /auth/google` | Verify Google Identity credential | Google client configured |
 | `GET /me` | Customer account details | `Authorization: Bearer <JWT>` |
 | `POST /broker/apply` | Submit broker application | Public; creates pending account |
-| `POST /broker/auth` | Individual broker email/password sign-in | Approved active account |
+| `POST /broker/otp/request` | Send broker email code | Approved active account; SMTP required |
+| `POST /broker/otp/verify` | Verify code and issue broker session | Approved active account |
+| `POST /broker/auth` | Alias for broker code verification | Email and code; passwords rejected |
 | `GET /broker/me` | Current staff identity | Staff session |
 | `POST /admin/auth` | Admin username/password sign-in | Local environment credentials |
 | `GET /admin/brokers` | Review broker applications | Admin session |
@@ -36,8 +38,8 @@ schema is at `/openapi.json`. The application source is `api/main.py`.
 | `POST /webhook/n8n/meeting` | Save a meeting | Shared n8n secret |
 
 Staff endpoints accept `Authorization: Bearer <session>` or the HttpOnly,
-SameSite=Strict staff cookie. Broker sessions are checked against Supabase Auth and
-current database approval on every request. Customer JWTs cannot authorize staff
+SameSite=Strict staff cookie. Broker sessions have a dedicated signed JWT audience and
+check current database approval on every request. Customer JWTs cannot authorize staff
 operations. Legacy shared broker secrets are no longer accepted. Compatibility
 `token` fields accept individual sessions; prefer headers/cookies so credentials
 stay out of URLs. The console removes old token query parameters from requests.

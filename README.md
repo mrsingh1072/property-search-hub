@@ -65,7 +65,7 @@ configuration until database and AI settings are present.
 
 Admin credentials are `ADMIN_USERNAME` and `ADMIN_PASSWORD` in local `.env`.
 Brokers apply at `/broker/apply`, wait for admin verification, then sign in with
-their individual email/password. Properties publish immediately after upload. See
+their individual email code. Properties publish immediately after upload. See
 [broker setup](docs/BROKERS.md). Restart after changing environment values. You can use `./start.ps1`
 for later launches after installing dependencies.
 

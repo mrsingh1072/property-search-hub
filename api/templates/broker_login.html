@@ -1,7 +1,82 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="stylesheet" href="/static/shared.css"><style>
-body{background:#f6f4ec;color:#12211b;font-family:Inter,system-ui,sans-serif;margin:0}main{max-width:520px;margin:6vh auto;padding:30px;background:white;border:1px solid #e4dfd1;border-radius:20px}
-h1{font-size:26px;margin:12px 0}p{line-height:1.6;color:#53655d}label{display:block;margin:15px 0 6px;font-weight:600;font-size:14px}input,textarea{width:100%;box-sizing:border-box;padding:12px;border:1px solid #d8ded9;border-radius:10px;font:inherit}button{background:#0f7a52;color:white;border:0;border-radius:10px;padding:12px 18px;font:inherit;cursor:pointer;margin-top:18px}button:disabled{opacity:.6}a{color:#0f7a52}.message{white-space:pre-wrap;margin-top:16px}nav{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:24px}@media(max-width:560px){main{margin:20px 12px;padding:22px}}
-</style><title>Broker sign in — ApnaGhar</title></head><body><main><a href="/">ApnaGhar · Patna</a><h1>Broker sign in</h1><p>Sign in with your approved broker account to manage your properties and assigned leads.</p>
-<form id="login"><label for="email">Email</label><input id="email" type="email" required autocomplete="username"><label for="password">Password</label><input id="password" type="password" required autocomplete="current-password"><button id="submit">Sign in</button></form><p id="message" class="message" role="status"></p><nav><a href="/broker/apply">Apply as a broker</a><a href="/admin/login">ApnaGhar admin</a></nav></main>
-<script>document.getElementById('login').addEventListener('submit',async e=>{e.preventDefault();const button=document.getElementById('submit'),message=document.getElementById('message');button.disabled=true;message.textContent='Signing in…';try{const response=await fetch('/broker/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('email').value,password:document.getElementById('password').value})});const data=await response.json();if(response.ok){localStorage.setItem('btok',data.token);location.replace('/broker');}else{message.textContent=typeof data.detail==='string'?data.detail:'Check your email and password.';}}catch(error){message.textContent='Could not connect. Try again.';}finally{button.disabled=false;}});</script></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Broker sign in — ApnaGhar</title>
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@600,700&f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<style>
+:root{--ink:#12211b;--soft:#4a5a52;--paper:#f6f4ec;--paper2:#efece1;--emerald:#0f7a52;--emerald-dk:#0b5c3d;--emerald-lt:#e7f3ec;--line:#e3dfd2;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'General Sans',system-ui,sans-serif;color:var(--ink);background:var(--paper);
+  min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;-webkit-font-smoothing:antialiased;position:relative;overflow-x:hidden;overflow-y:auto}
+body::before{content:'';position:absolute;top:-12%;left:-8%;width:46%;height:80%;background:radial-gradient(circle,rgba(15,122,82,.14),transparent 70%);pointer-events:none}
+body::after{content:'';position:absolute;bottom:-16%;right:-8%;width:46%;height:86%;background:radial-gradient(circle,rgba(200,137,42,.12),transparent 70%);pointer-events:none}
+.card{position:relative;z-index:1;width:100%;max-width:420px;background:#fff;border-radius:22px;
+  padding:38px 34px;box-shadow:0 30px 70px rgba(18,33,27,.16);border:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:11px;margin-bottom:24px}
+.brand .dot{width:40px;height:40px;border-radius:12px;background:var(--emerald);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-family:'Clash Display';font-weight:700;font-size:21px}
+.brand .bt{font-family:'Clash Display';font-weight:700;font-size:20px;line-height:1.05}
+.brand .bs{font-size:12px;color:var(--soft)}
+h1{font-family:'Clash Display';font-size:26px;font-weight:700;letter-spacing:-.01em;margin-bottom:6px}
+.sub{font-size:14.5px;color:var(--soft);margin-bottom:22px}
+#gbtn{display:flex;justify-content:center;margin-bottom:16px;min-height:44px}
+.divider{display:flex;align-items:center;gap:10px;color:var(--soft);font-size:12.5px;margin:6px 0 16px}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--line)}
+label{display:block;font-size:12.5px;font-weight:600;color:var(--soft);margin:0 0 6px}
+.field{position:relative;margin-bottom:12px}
+.field i{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#9aa79f;font-size:17px}
+input{width:100%;padding:12px 13px 12px 40px;border:1.5px solid var(--line);border-radius:12px;
+  font-size:15px;font-family:inherit;outline:none;background:var(--paper);transition:border-color .15s,box-shadow .15s}
+input:focus{border-color:var(--emerald);background:#fff;box-shadow:0 0 0 3px rgba(15,122,82,.14)}
+#otp{letter-spacing:6px;text-align:center;font-size:18px;padding-left:13px}
+.btn{width:100%;padding:13px;border:0;border-radius:12px;background:var(--emerald);color:#fff;
+  font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;
+  box-shadow:0 8px 22px rgba(15,122,82,.28);transition:background .15s,transform .12s}
+.btn:hover{background:var(--emerald-dk);transform:translateY(-1px)}
+.btn:disabled{opacity:.7;cursor:default;transform:none}
+.msg{font-size:13px;margin-top:12px;min-height:16px;text-align:center}
+.foot{margin-top:20px;text-align:center;font-size:13px;color:var(--soft)}
+.foot a{color:var(--emerald);font-weight:600;text-decoration:none}
+.skip{margin-top:8px}
+.text-button{border:0;background:none;color:var(--emerald);font:inherit;cursor:pointer;padding:4px}.text-button:disabled{color:var(--soft);cursor:default}
+</style>
+
+</head>
+<body>
+<div class="card">
+  <div class="brand">
+    <span class="dot">A</span>
+    <div><div class="bt">ApnaGhar</div><div class="bs">Your Patna broker workspace</div></div>
+  </div>
+  <h1>Broker sign in</h1>
+  <p class="sub">Manage your properties, leads and visits. Sign in with a code sent to your approved broker email.</p>
+
+
+
+  <label for="email">Email</label>
+  <div class="field"><i class="ph ph-envelope-simple"></i>
+    <input id="email" type="email" autocomplete="email" maxlength="254" required placeholder="you@example.com" autofocus></div>
+
+  <div id="otp-row" style="display:none">
+    <label for="otp">Verification code</label>
+    <div class="field"><i class="ph ph-shield-check"></i>
+      <input id="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="6-digit code"></div>
+  </div>
+
+  <button class="btn" id="go" onclick="loginAction()"><i class="ph ph-paper-plane-tilt"></i> Send code</button>
+  <p class="msg" id="msg" role="status" aria-live="polite"></p>
+  <div id="code-actions" class="foot" hidden><button type="button" id="resend" class="text-button">Resend code</button> · <button type="button" id="change-email" class="text-button">Change email</button></div>
+  <div class="foot">
+    <a href="/broker/apply">Apply as a broker →</a>
+    <div class="skip"><a href="/admin/login">ApnaGhar admin</a></div>
+    <div class="skip"><a href="/" style="color:var(--soft);font-weight:500">← Back to home</a></div>
+  </div>
+</div>
+
+<script src="/static/email-login.js"></script>
+</body>
+</html>

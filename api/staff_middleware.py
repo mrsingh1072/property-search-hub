@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse, RedirectResponse
 from api import staff_auth
 from database.staff_scope import current_staff
 
-PUBLIC = {'/broker/login', '/broker/apply', '/broker/auth', '/broker/logout',
+PUBLIC = {'/broker/otp/request', '/broker/otp/verify', '/broker/login', '/broker/apply', '/broker/auth', '/broker/logout',
           '/admin/login', '/admin/auth', '/admin/logout'}
 
 
