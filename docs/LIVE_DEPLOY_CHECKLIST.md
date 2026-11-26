@@ -3,7 +3,7 @@
 Complete [SETUP.md](SETUP.md). Check only features enabled for your own accounts.
 
 - [ ] Required configuration check passes; no placeholder keys remain.
-- [ ] All six SQL migrations ran successfully.
+- [ ] All seven SQL migrations ran successfully.
 - [ ] `scripts/verify_services.py` passes database and AI checks.
 - [ ] Sample data is labelled; real inventory is owned, accurate and authorized.
 - [ ] Automated tests and `pip check` pass.

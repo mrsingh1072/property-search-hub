@@ -7,7 +7,7 @@ site visits. Brokers manage inventory, leads, offers and visit confirmations.
 **Stack:** Python 3.11 · FastAPI · Supabase/PostgreSQL + pgvector · FastEmbed/ONNX ·
 Gemini/Groq/OpenRouter · HTML/CSS/JavaScript.
 
-[Patna rollout and listings](docs/PATNA.md) · [Local setup and API keys](docs/SETUP.md) · [API guide](docs/API.md) ·
+[Broker accounts and admin approval](docs/BROKERS.md) · [Patna rollout and listings](docs/PATNA.md) · [Local setup and API keys](docs/SETUP.md) · [API guide](docs/API.md) ·
 [Architecture](docs/01_ARCHITECTURE.md) · [Deployment](docs/DEPLOY.md) ·
 [Attribution](NOTICE.md)
 
@@ -17,6 +17,7 @@ Gemini/Groq/OpenRouter · HTML/CSS/JavaScript.
   metadata filters, hybrid retrieval and ranking.
 - Browser chat, property cards, browse filters and saved favourites.
 - Buyer requirement collection and lead capture.
+- Individual broker accounts verified by ApnaGhar admin; isolated listings, leads and visits.
 - Broker dashboard, lead pipeline, offer notes, analytics and CSV imports.
 - Broker confirmation and rescheduling flows for property visits.
 - Optional WhatsApp, Telegram, email, Google login, Calendar, SMS and n8n adapters.
@@ -37,7 +38,7 @@ python -m venv .venv
 
 Open `.env` and add `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and at least one
 of `GEMINI_API_KEY`, `GROQ_API_KEY`, or `OPENROUTER_API_KEY`.
-Run the six SQL migrations listed in [the setup guide](docs/SETUP.md), then:
+Run the seven SQL migrations listed in [the setup guide](docs/SETUP.md), then:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/check_config.py
@@ -55,13 +56,17 @@ configuration until database and AI settings are present.
 | Home | http://127.0.0.1:8000/ |
 | Chat | http://127.0.0.1:8000/chat |
 | Listings | http://127.0.0.1:8000/properties/browse |
+| Broker application | http://127.0.0.1:8000/broker/apply |
+| Admin login | http://127.0.0.1:8000/admin/login |
 | Broker login | http://127.0.0.1:8000/broker/login |
 | Interactive API docs | http://127.0.0.1:8000/docs |
 | Process health | http://127.0.0.1:8000/health |
 | Configuration readiness | http://127.0.0.1:8000/ready |
 
-Broker username defaults to `broker`; use the generated `BROKER_PASSWORD` in
-`.env`. Restart after changing environment values. You can use `./start.ps1`
+Admin credentials are `ADMIN_USERNAME` and `ADMIN_PASSWORD` in local `.env`.
+Brokers apply at `/broker/apply`, wait for admin verification, then sign in with
+their individual email/password. Properties publish immediately after upload. See
+[broker setup](docs/BROKERS.md). Restart after changing environment values. You can use `./start.ps1`
 for later launches after installing dependencies.
 
 ## Configuration

@@ -12,8 +12,8 @@ python -m venv .venv
 .\.venv\Scripts\python.exe scripts/setup_local.py
 ```
 
-The setup script creates `.env` and random broker/JWT/webhook secrets. It preserves
-an existing `.env`. Open `.env` in your editor; keep credentials on your computer.
+The setup script creates `.env` and random admin/JWT/webhook secrets. It preserves
+existing service credentials and adds missing admin settings. Open `.env` in your editor; keep credentials on your computer.
 Virtual environment activation is optional because every command specifies Python.
 
 ## 2. Connect Supabase
@@ -32,7 +32,7 @@ operations; an anon/publishable key is insufficient for this backend.
 See [Supabase API key documentation](https://supabase.com/docs/guides/api/api-keys).
 
 For a new project, open `supabase/setup.sql`, copy its contents into Supabase's
-SQL Editor, and click Run. It bundles all six migrations. No credentials belong
+SQL Editor, and click Run. It bundles all seven migrations. No credentials belong
 in that SQL file. Alternatively, run these individual files in this exact order
 (use one approach, not both):
 
@@ -42,6 +42,10 @@ in that SQL file. Alternatively, run these individual files in this exact order
 4. `supabase/migrations/004_customers_and_pipeline.sql`
 5. `supabase/migrations/005_server_access.sql`
 6. `supabase/migrations/006_patna_defaults.sql`
+7. `supabase/migrations/007_verified_broker_accounts.sql`
+
+If 001–006 are already installed, run only 007. This adds broker accounts,
+review history and listing ownership; existing profiles are not auto-approved.
 
 This creates pgvector search, listings, brokers, sessions, leads, meetings,
 customers, broker confirmations, offer fields and storage buckets. Migration 005
@@ -89,17 +93,11 @@ Follow [the Patna import guide](PATNA.md): fill
 broker dashboard CSV import. The upload validates, geocodes, embeds and stores
 the listings directly in Supabase. The first embedding downloads the model.
 
-Create your broker record using your own contact details:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/fix_broker.py --name "Your Name" --email "you@example.com" --phone "YOUR_PHONE"
-```
-
-This upserts only the specified broker ID (default `broker_001`) with Patna
-coverage. It does not overwrite whichever broker happens to be first in the
-database. A header-only generic template also exists at `examples/properties.csv`.
-For an existing database that already ran migrations 001–005, run only migration
-006 to update future city defaults; existing rows keep their original cities.
+Brokers register at `/broker/apply` with individual email/password and contact
+information. ApnaGhar admin verifies the broker through `/admin/login` and approves
+the application. Only approved brokers can sign in and add their own listings.
+Property publication does not require a second approval. See [BROKERS.md](BROKERS.md).
+The old `scripts/fix_broker.py` no longer creates active accounts.
 
 ## 5. Check and start
 
@@ -117,8 +115,8 @@ Open [the homepage](http://127.0.0.1:8000),
 [chat](http://127.0.0.1:8000/chat),
 [listings](http://127.0.0.1:8000/properties/browse), or
 [broker login](http://127.0.0.1:8000/broker/login).
-Username is `BROKER_USERNAME` (initially `broker`); password is `BROKER_PASSWORD`
-in your local `.env`. The API documentation is at
+Admin signs in at `/admin/login` using `ADMIN_USERNAME` and `ADMIN_PASSWORD`
+from local `.env`. Brokers use their approved individual email/password. The API documentation is at
 [Swagger UI](http://127.0.0.1:8000/docs).
 
 `/health` checks the server process. `/ready` checks configuration presence only;
@@ -157,10 +155,11 @@ Telegram webhook for the same bot at the same time.
 
 - **Chat says credentials are missing:** fill the required values and restart.
 - **401 from a provider:** check the key in its account dashboard; do not log it.
-- **Unknown table / column / RPC:** run all six migrations in order.
+- **Unknown table / column / RPC:** run all seven migrations in order.
 - **No homes found:** load embeddings and check that listings are available.
 - **OTP request fails:** configure Gmail app password and inspect local logs.
-- **Broker login unavailable:** run setup or fill `BROKER_PASSWORD` and `BROKER_TOKEN`.
+- **Broker login unavailable:** run migration 007, apply for an account, and approve it from the admin console.
+- **Admin login unavailable:** run setup and check `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `ADMIN_SESSION_SECRET` locally.
 - **Port 8000 in use:** stop the existing server or use `--port 8001` and update URLs.
 - **Dependency install fails:** use Python 3.11/3.12 and verify internet access.
 - **CSV conversion fails:** check required columns and ensure records are for Patna, Bihar.

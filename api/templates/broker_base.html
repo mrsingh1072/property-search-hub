@@ -115,13 +115,25 @@
 <div id="toast"></div>
 
 <script>
-// Shared token handling — gate the whole console behind the broker login page.
+// Individual staff session; the server enforces approval and ownership.
 function tok(){return localStorage.getItem('btok')||'';}
 function saveTok(v){if(v)localStorage.setItem('btok',v);}
-function logoutBroker(){localStorage.removeItem('btok');location.replace('/broker/login');}
-window.addEventListener('DOMContentLoaded',()=>{
-  if(!tok()){location.replace('/broker/login');return;}
-  // mobile menu button
+async function logoutBroker(){await fetch('/broker/logout',{method:'POST'});localStorage.removeItem('btok');location.replace('/broker/login');}
+const staffFetch=window.fetch.bind(window);
+window.fetch=async function(input,options={}){
+  const url=new URL(typeof input==='string'?input:input.url,location.href);
+  if(url.origin!==location.origin)return staffFetch(input,options);
+  url.searchParams.delete('token');
+  const headers=new Headers(options.headers||{});
+  if(tok())headers.set('Authorization','Bearer '+tok());
+  const response=await staffFetch(url.pathname+url.search,{...options,headers,credentials:'same-origin'});
+  if(response.status===401||response.status===403){localStorage.removeItem('btok');location.replace('/broker/login');}
+  return response;
+};
+window.addEventListener('DOMContentLoaded',async()=>{
+  try{const response=await fetch('/broker/me');if(!response.ok)return;const staff=await response.json();document.querySelector('.su-name').textContent=staff.name;document.querySelector('.su-role').textContent=staff.role==='admin'?'ApnaGhar admin':'Verified broker';
+  if(staff.role==='admin'){const link=document.createElement('a');link.className='sb-link';link.href='/admin';link.textContent='Broker approvals';document.querySelector('.sb-nav').prepend(link);['/broker/add','/broker/upload'].forEach(path=>{const item=document.querySelector('a[href="'+path+'"]');if(item)item.hidden=true;});}}
+  catch(error){location.replace('/broker/login');}
   if(window.innerWidth<=768)document.getElementById('mob-menu').style.display='flex';
 });
 function openSb(){document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('show');}

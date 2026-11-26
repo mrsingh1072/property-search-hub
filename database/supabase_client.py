@@ -13,12 +13,19 @@ load_dotenv()
 
 
 @lru_cache(maxsize=1)
-def get_client() -> Client:
+def get_service_client() -> Client:
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY")
     if not url or not key:
         raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_KEY) must be set in .env")
     return create_client(url, key)
+
+
+def get_client():
+    from database.staff_scope import current_staff, ScopedClient
+    client = get_service_client()
+    principal = current_staff.get()
+    return ScopedClient(client, principal) if principal and principal.role == 'broker' else client
 
 
 # ── Properties ──────────────────────────────────────────────────────────────
@@ -51,6 +58,7 @@ def upsert_property(doc: dict, semantic_text: str, embedding: list[float]) -> di
 
     row = {
         "id": doc["doc_id"],
+        "broker_id": (doc.get("source_ids") or {}).get("broker_id"),
         "property_id": doc["source_ids"]["property_id"],
         "data": merged_data,
         "semantic_text": semantic_text,
@@ -111,12 +119,12 @@ def list_properties(limit: int = 300, broker_id: str | None = None) -> list[dict
     """List properties (newest first) for the broker 'My listings' view."""
     client = get_client()
     rows = (client.table("properties")
-            .select("id,property_id,area_name,city,bhk,price_inr,property_type,status,data,created_at")
+            .select("id,broker_id,property_id,area_name,city,bhk,price_inr,property_type,status,data,created_at")
             .eq("city", CITY)
             .order("created_at", desc=True).limit(limit).execute().data) or []
     if broker_id:
         rows = [r for r in rows
-                if ((r.get("data") or {}).get("source_ids") or {}).get("broker_id") == broker_id]
+                if r.get("broker_id") == broker_id]
     # Trim heavy/irrelevant data for the list view (keep images count + a couple fields)
     out = []
     for r in rows:
@@ -297,6 +305,15 @@ def save_session(session_id: str, messages: list, requirements: dict, stage: str
 
 def save_meeting(meeting: dict) -> dict:
     client = get_client()
+    meeting = dict(meeting)
+    if not meeting.get("broker_id") and meeting.get("lead_id"):
+        leads = client.table("leads").select("broker_id").eq("id", meeting["lead_id"]).limit(1).execute().data or []
+        if leads:
+            meeting["broker_id"] = leads[0].get("broker_id")
+    if not meeting.get("broker_id") and meeting.get("property_id"):
+        props = client.table("properties").select("broker_id").eq("id", meeting["property_id"]).limit(1).execute().data or []
+        if props:
+            meeting["broker_id"] = props[0].get("broker_id")
     result = client.table("meetings").insert(meeting).execute()
     return result.data[0] if result.data else {}
 
@@ -385,6 +402,7 @@ def get_broker_for_area(area_name: str) -> dict | None:
         client.table("brokers")
         .select("*")
         .eq("is_active", True)
+        .eq("approval_status", "approved")
         .contains("areas", [area_name])
         .limit(1)
         .execute()
@@ -394,7 +412,7 @@ def get_broker_for_area(area_name: str) -> dict | None:
 
 def get_all_brokers() -> list[dict]:
     client = get_client()
-    return client.table("brokers").select("*").eq("is_active", True).execute().data or []
+    return client.table("brokers").select("*").eq("is_active", True).eq("approval_status", "approved").execute().data or []
 
 
 def get_broker_by_phone(phone: str) -> dict | None:

@@ -17,6 +17,8 @@ import os
 from collections import OrderedDict
 from datetime import datetime, timezone
 
+from database.staff_scope import approved_broker_channel, current_staff
+
 logger = logging.getLogger(__name__)
 
 # Maps a broker-notification WhatsApp message-id → the customer it was about, so when
@@ -153,10 +155,14 @@ def _day_schedule_note(proposed_dt: datetime | None) -> str:
 
 
 def is_configured_broker(phone: str) -> bool:
-    """True if this WhatsApp number is the configured broker."""
-    configured = os.environ.get("BROKER_WHATSAPP_PHONE") or os.environ.get("WHATSAPP_BROKER_PHONE") or ""
-    def _n(p): return re.sub(r"\D", "", p or "")[-10:]
-    return bool(configured) and _n(phone) == _n(configured)
+    """Only currently approved accounts can use the broker messaging experience."""
+    principal = current_staff.get()
+    normalized = re.sub(r"\D", "", phone or "")[-10:]
+    if principal and principal.role == 'broker' and principal.phone[-10:] == normalized:
+        return True
+    from database.supabase_client import get_broker_by_phone
+    broker = get_broker_by_phone(phone)
+    return bool(broker and broker.get('approval_status') == 'approved' and broker.get('is_active'))
 
 
 def _fmt_when(iso: str) -> str:
@@ -867,6 +873,7 @@ _MSG_VERB_RE = re.compile(
 _ASK_SELF_RE = re.compile(r"\b(tell|inform|remind|show|let|give) me\b", re.I)
 
 
+@approved_broker_channel(failure='Broker account approval is required.')
 def handle_broker_command(broker_phone: str, text: str, reply_context_id: str | None = None) -> str:
     """The broker messaged something that isn't a YES/NO confirmation reply.
     Routes to a real capability, else answers conversationally via the LLM.
@@ -1021,6 +1028,7 @@ def ask_broker_availability(
     return True
 
 
+@approved_broker_channel()
 def handle_broker_reply(broker_phone: str, reply_text: str) -> bool:
     """
     Called when broker replies on WhatsApp. Matches to a pending confirmation,
@@ -1039,16 +1047,8 @@ def handle_broker_reply(broker_phone: str, reply_text: str) -> bool:
     # This handler runs FIRST for every inbound WhatsApp message. Only let it act when
     # the sender is actually the broker — otherwise a buyer who types "reschedule" or
     # "yes" gets pulled into the broker flow (and shown broker-only instructions).
-    def _norm(p): return re.sub(r"\D", "", p or "")[-10:]
-    configured = os.environ.get("BROKER_WHATSAPP_PHONE") or os.environ.get("WHATSAPP_BROKER_PHONE") or ""
-    is_broker = bool(configured) and _norm(broker_phone) == _norm(configured)
-    if not is_broker:
-        try:
-            is_broker = bool(get_pending_broker_confirmation(broker_phone))
-        except Exception:
-            is_broker = False
-    if not is_broker:
-        return False  # sender isn't the broker — let the buyer agent handle it
+    if not is_configured_broker(broker_phone):
+        return False
 
     if _RESCHEDULE_RE.search(reply_text):
         return handle_broker_reschedule(broker_phone, reply_text)

@@ -43,7 +43,7 @@ class LocalSetupTests(unittest.TestCase):
             self.assertTrue(create_env(destination))
             original = destination.read_text(encoding='utf-8')
             secrets = [line.split('=', 1)[1] for line in original.splitlines()
-                       if line.startswith(('JWT_SECRET=', 'BROKER_TOKEN=', 'BROKER_PASSWORD='))]
+                       if line.startswith(('JWT_SECRET=', 'ADMIN_SESSION_SECRET=', 'ADMIN_PASSWORD='))]
             self.assertEqual(len(set(secrets)), 3)
             self.assertTrue(all(len(value) >= 32 for value in secrets))
             self.assertFalse(create_env(destination))
@@ -52,7 +52,7 @@ class LocalSetupTests(unittest.TestCase):
     def test_readiness_does_not_expose_secrets_or_require_optional_channels(self):
         os.environ.update(SUPABASE_URL='https://test.supabase.co',
                           SUPABASE_SERVICE_ROLE_KEY='private-db-key', GROQ_API_KEY='private-ai-key',
-                          JWT_SECRET='j' * 40, BROKER_TOKEN='t' * 40, BROKER_PASSWORD='p' * 40)
+                          JWT_SECRET='j' * 40, ADMIN_SESSION_SECRET='t' * 40, ADMIN_PASSWORD='p' * 40, ADMIN_USERNAME='admin')
         status = configuration_status()
         self.assertTrue(status['ready'])
         self.assertFalse(status['optional']['whatsapp'])
@@ -84,12 +84,14 @@ class LocalSetupTests(unittest.TestCase):
             self.assertFalse(auth.verify_otp('buyer@example.com', wrong))
         self.assertFalse(auth.verify_otp('buyer@example.com', code))
 
-    def test_broker_sign_in_and_invalid_password(self):
-        os.environ.update(BROKER_PASSWORD='password', BROKER_TOKEN='private-token')
-        response = self.client.post('/broker/auth', json={'username': 'broker', 'password': 'password'})
-        self.assertEqual(response.json(), {'token': 'private-token'})
-        self.assertEqual(self.client.post('/broker/auth', json={
-            'username': 'broker', 'password': 'wrong'}).status_code, 401)
+    def test_admin_sign_in_and_invalid_password(self):
+        os.environ.update(ADMIN_USERNAME='admin', ADMIN_PASSWORD='long-test-password', ADMIN_SESSION_SECRET='s' * 40)
+        response = self.client.post('/admin/auth', json={'username': 'admin', 'password': 'long-test-password'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['role'], 'admin')
+        self.assertIn('token', response.json())
+        self.assertEqual(self.client.post('/admin/auth', json={
+            'username': 'admin', 'password': 'wrong'}).status_code, 401)
 
     def test_optional_webhooks_fail_closed_without_configuration(self):
         self.assertEqual(self.client.post('/webhook/whatsapp', json={}).status_code, 503)

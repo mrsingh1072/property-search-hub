@@ -11,7 +11,7 @@ class DatabaseVerificationTests(unittest.TestCase):
         'ready': False, 'required': {'database': True, 'ai_provider': False}})
     def test_database_only_does_not_require_or_call_ai(self, status, client, complete):
         self.assertEqual(main(['--database-only']), 0)
-        self.assertEqual(client.return_value.table.call_count, 7)
+        self.assertEqual(client.return_value.table.call_count, 8)
         client.return_value.rpc.assert_called_once()
         complete.assert_not_called()
 

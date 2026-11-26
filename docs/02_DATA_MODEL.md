@@ -7,7 +7,8 @@ missing migrations in sequence.
 | Table | Purpose |
 | --- | --- |
 | properties | Normalized listing JSON, 384-dimensional embedding, metadata and status |
-| brokers | Broker contact details and locality coverage |
+| brokers | Auth user ID, contact details, locality coverage and approval state |
+| broker_reviews | Admin approval, rejection and suspension audit history |
 | sessions | Conversation messages, requirements and stage |
 | leads | Buyer requirements, contact information, pipeline state and offer notes |
 | meetings | Visit schedule, status, reminders and outcome |
@@ -33,3 +34,9 @@ are stored in the configured public buckets; upload only material intended for
 public listing pages.
 
 See [Patna import instructions](PATNA.md).
+
+Migration 007 adds `properties.broker_id` and links brokers to `auth.users`.
+Broker passwords are managed by Supabase Auth; public tables contain no passwords.
+Broker access requires both `approval_status = approved` and `is_active = true`.
+The admin username/password/signing secret exist only in server environment settings.
+Only the server service role may execute the atomic broker review function.

@@ -9,7 +9,7 @@ never pushes code or publishes a site.
    network access and sufficient disk/RAM; hosting quotas and prices vary.
 3. Configure secrets using the host's environment manager. Do not upload `.env`
    or service-account JSON to a public repository.
-4. Run all six database migrations in the order in `SETUP.md` and load inventory.
+4. Run all seven database migrations in the order in `SETUP.md` and load inventory.
 5. Set `PUBLIC_BASE_URL` to your own HTTPS domain. Set `CORS_ORIGINS` only if a
    separate frontend origin is needed. Same-origin pages need no CORS override.
 6. Run `uvicorn api.main:app --host 0.0.0.0 --port $PORT --workers 1`.

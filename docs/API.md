@@ -21,7 +21,12 @@ schema is at `/openapi.json`. The application source is `api/main.py`.
 | `POST /auth/otp/verify` | Verify a single-use code and issue JWT | Email/code |
 | `POST /auth/google` | Verify Google Identity credential | Google client configured |
 | `GET /me` | Customer account details | `Authorization: Bearer <JWT>` |
-| `POST /broker/auth` | Broker username/password sign-in | Returns shared broker token |
+| `POST /broker/apply` | Submit broker application | Public; creates pending account |
+| `POST /broker/auth` | Individual broker email/password sign-in | Approved active account |
+| `GET /broker/me` | Current staff identity | Staff session |
+| `POST /admin/auth` | Admin username/password sign-in | Local environment credentials |
+| `GET /admin/brokers` | Review broker applications | Admin session |
+| `POST /admin/brokers/{id}/review` | Approve, reject or suspend broker | Admin session |
 | `GET /broker/leads` | Broker lead list | Broker token |
 | `POST /upload` | Import broker CSV | Multipart file and broker token |
 | `GET /webhook/whatsapp` | Meta verification challenge | Verify token |
@@ -30,10 +35,18 @@ schema is at `/openapi.json`. The application source is `api/main.py`.
 | `POST /webhook/n8n/lead` | Update a lead | Shared n8n secret |
 | `POST /webhook/n8n/meeting` | Save a meeting | Shared n8n secret |
 
-Broker endpoints use the `token` request field or query parameter shown in their
-Swagger schema. The current UI stores this shared token in browser storage.
-Customer JWTs and broker tokens are separate credentials. Do not expose either
-in public screenshots, copied URLs or access logs.
+Staff endpoints accept `Authorization: Bearer <session>` or the HttpOnly,
+SameSite=Strict staff cookie. Broker sessions are checked against Supabase Auth and
+current database approval on every request. Customer JWTs cannot authorize staff
+operations. Legacy shared broker secrets are no longer accepted. Compatibility
+`token` fields accept individual sessions; prefer headers/cookies so credentials
+stay out of URLs. The console removes old token query parameters from requests.
+
+Broker reads and writes are scoped to their own listings, leads, meetings and
+assigned conversations. Admin review is separate from customer authentication.
+Review actions are `approved`, `rejected` or `suspended`; approval confirms the
+Auth email only after the admin checks the applicant's identity/contact details.
+There is no property approval queue. See [BROKERS.md](BROKERS.md).
 
 ## Chat example
 

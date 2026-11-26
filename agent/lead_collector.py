@@ -83,7 +83,16 @@ def create_lead(
         requirements = {**requirements, "email": profile["email"]}
 
     area = requirements.get("area") or requirements.get("city", "Patna")
-    broker = get_broker_for_area(area)
+    broker = None
+    if property_id:
+        from database.supabase_client import get_client
+        client = get_client()
+        owners = client.table("properties").select("broker_id").eq("id", property_id).limit(1).execute().data or []
+        if owners and owners[0].get("broker_id"):
+            accounts = client.table("brokers").select("*").eq("id", owners[0]["broker_id"]).eq("is_active", True).eq("approval_status", "approved").limit(1).execute().data or []
+            broker = accounts[0] if accounts else None
+    if not property_id:
+        broker = get_broker_for_area(area)
 
     crore = 1_00_00_000
     max_budget_cr = requirements.get("max_budget_cr")
@@ -112,6 +121,9 @@ def create_lead(
         except Exception as e:
             logger.warning(f"dedup lookup failed (continuing): {e}")
 
+        # Keep separate leads when the same buyer contacts different brokers.
+        if existing and existing.get("broker_id") != lead_data.get("broker_id"):
+            existing = None
         if existing:
             refresh = {k: v for k, v in lead_data.items() if v is not None}
             refresh["status"] = existing.get("status") or "new"  # keep broker's progress

@@ -1,6 +1,8 @@
 import os
 import unittest
 from unittest.mock import patch
+from fastapi import HTTPException
+from database.staff_scope import StaffPrincipal
 
 from fastapi.testclient import TestClient
 
@@ -13,6 +15,14 @@ class BrokerPropertyManagementTests(unittest.TestCase):
         self.previous_token = os.environ.get("BROKER_TOKEN")
         self.previous_app_secret = os.environ.get("WHATSAPP_APP_SECRET")
         os.environ["BROKER_TOKEN"] = "test-secret"
+        def authenticate(token):
+            if token != 'test-secret':
+                raise HTTPException(401, 'Invalid session')
+            return StaffPrincipal(role='admin', name='Test admin')
+        auth_patch = patch('api.staff_auth.authenticate_token', side_effect=authenticate)
+        auth_patch.start(); self.addCleanup(auth_patch.stop)
+        actor_patch = patch('api.main.actor_broker_id', return_value='test-broker')
+        actor_patch.start(); self.addCleanup(actor_patch.stop)
         self.client = TestClient(app)
 
     def tearDown(self):

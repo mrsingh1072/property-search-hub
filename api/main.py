@@ -42,6 +42,10 @@ sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv
 load_dotenv()
 from city_config import CITY
+from api.staff_middleware import StaffAccessMiddleware
+from api.staff_routes import router as staff_router
+from api.staff_auth import require_staff_token, actor_broker_id
+from database.staff_scope import current_staff
 
 from agent.property_agent import process_message
 from broker.upload_handler import (
@@ -96,6 +100,9 @@ app = FastAPI(
     version="1.1.0",
     lifespan=lifespan,
 )
+
+app.include_router(staff_router)
+app.add_middleware(StaffAccessMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -365,7 +372,7 @@ MAX_CSV_SIZE_MB = 10
 
 
 @app.post("/upload/preview")
-async def upload_preview(token: str = Form(...), file: UploadFile = File(...)):
+async def upload_preview(token: str = Form(""), file: UploadFile = File(...)):
     """
     Parse a broker CSV and return a preview of detected columns + sample rows
     WITHOUT importing. Broker reviews, corrects if needed, then calls /upload.
@@ -429,6 +436,7 @@ async def upload_properties(
     Geocoding (lat/lng) + Overpass POI distances run automatically per property.
     """
     _check_broker_token(token)
+    broker_id = actor_broker_id(broker_id)
     if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are accepted")
 
@@ -473,7 +481,7 @@ async def upload_properties(
             raise HTTPException(status_code=400, detail=f"Required mappings missing: {', '.join(sorted(missing))}")
 
     job_id = uuid.uuid4().hex
-    _UPLOAD_JOBS[job_id] = {"status": "processing", "filename": file.filename}
+    _UPLOAD_JOBS[job_id] = {"status": "processing", "filename": file.filename, "broker_id": broker_id}
     background_tasks.add_task(_run_upload, job_id, tmp.name, broker_id, parsed_map)
 
     return {
@@ -485,10 +493,11 @@ async def upload_properties(
 
 
 @app.get("/upload/status/{job_id}")
-async def upload_status(job_id: str, token: str):
+async def upload_status(job_id: str, token: str = ""):
     _check_broker_token(token)
     job = _UPLOAD_JOBS.get(job_id)
-    if not job:
+    principal = current_staff.get()
+    if not job or (principal.role == "broker" and job.get("broker_id") != principal.broker_id):
         raise HTTPException(status_code=404, detail="Upload job not found")
     return job
 
@@ -522,10 +531,10 @@ def _run_upload(job_id: str, filepath: str, broker_id: str | None,
                 filepath = mapped_path
 
         result = process_csv(filepath, broker_id=broker_id)
-        _UPLOAD_JOBS[job_id] = {"status": "complete", **result}
+        _UPLOAD_JOBS[job_id].update({"status": "complete", **result})
         logger.info(f"Upload job complete: {result}")
     except Exception as e:
-        _UPLOAD_JOBS[job_id] = {"status": "failed", "error": str(e)}
+        _UPLOAD_JOBS[job_id].update({"status": "failed", "error": str(e)})
         logger.error(f"Upload pipeline error: {e}")
     finally:
         Path(filepath).unlink(missing_ok=True)
@@ -618,14 +627,14 @@ async def meeting_webhook(payload: MeetingWebhook):
 
 
 @app.get("/meetings/upcoming")
-async def upcoming_meetings(token: str, hours_ahead: int = 24):
+async def upcoming_meetings(token: str = "", hours_ahead: int = 24):
     _check_broker_token(token)
     meetings = get_upcoming_meetings(hours_ahead)
     return {"count": len(meetings), "meetings": meetings}
 
 
 @app.get("/broker/meetings/api")
-async def broker_meetings_api(token: str, status: str = ""):
+async def broker_meetings_api(token: str = "", status: str = ""):
     """All meetings for broker dashboard, with buyer details."""
     _check_broker_token(token)
     from database.supabase_client import list_meetings
@@ -729,7 +738,7 @@ async def broker_decline_meeting(meeting_id: str, req: dict):
 
 
 @app.get("/api/broker/calendar/busy")
-async def broker_calendar_busy(token: str, days: int = 7):
+async def broker_calendar_busy(token: str = "", days: int = 7):
     """Return broker's Google Calendar busy slots for the next N days."""
     _check_broker_token(token)
     from datetime import datetime, timezone
@@ -814,7 +823,7 @@ MAX_IMAGE_SIZE_MB = 5
 
 
 @app.post("/properties/{property_id}/images")
-async def upload_image(property_id: str, token: str = Form(...), file: UploadFile = File(...)):
+async def upload_image(property_id: str, token: str = Form(""), file: UploadFile = File(...)):
     _check_broker_token(token)
     if not get_property_images(property_id) and not _property_exists(property_id):
         raise HTTPException(status_code=404, detail="Property not found")
@@ -844,7 +853,7 @@ async def get_images(property_id: str):
 
 
 @app.post("/properties/{property_id}/images/multi")
-async def upload_images_multi(property_id: str, token: str = Form(...), files: list[UploadFile] = File(...)):
+async def upload_images_multi(property_id: str, token: str = Form(""), files: list[UploadFile] = File(...)):
     """Upload multiple images at once. Drops Unsplash placeholders when real images are added."""
     _check_broker_token(token)
     if not get_property_images(property_id) and not _property_exists(property_id):
@@ -866,7 +875,7 @@ async def upload_images_multi(property_id: str, token: str = Form(...), files: l
 
 
 class DeleteImageReq(BaseModel):
-    token: str
+    token: str = ""
     image_url: str
 
 
@@ -878,7 +887,7 @@ async def delete_image(property_id: str, req: DeleteImageReq):
 
 
 class ReorderImagesReq(BaseModel):
-    token: str
+    token: str = ""
     ordered_urls: list[str]
 
 
@@ -1635,18 +1644,10 @@ async def api_featured():
 
 # ── Broker dashboard ─────────────────────────────────────────────────────────
 # Lightweight, free: JSON endpoints + one static HTML page. Protected by a shared
-# token (set BROKER_TOKEN in .env; defaults to "broker" for local use).
-
-def _broker_token() -> str:
-    return os.environ.get("BROKER_TOKEN", "")
-
+# account. Approval and ownership checks run in staff middleware and scoped queries.
 
 def _check_broker_token(token: str | None):
-    configured = _broker_token()
-    if not configured:
-        raise HTTPException(status_code=503, detail="BROKER_TOKEN is not configured")
-    if not token or not hmac.compare_digest(token, configured):
-        raise HTTPException(status_code=401, detail="Invalid broker token")
+    return require_staff_token(token)
 
 
 @app.get("/broker/login", response_class=HTMLResponse)
@@ -1656,23 +1657,6 @@ async def broker_login_page():
     if tmpl.exists():
         return HTMLResponse(tmpl.read_text(encoding="utf-8"))
     return HTMLResponse("<p>Broker login unavailable.</p>", status_code=500)
-
-
-@app.post("/broker/auth")
-async def broker_auth(req: dict):
-    """Validate broker username + password, hand back the dashboard token.
-    A single broker account: set BROKER_USERNAME / BROKER_PASSWORD in .env."""
-    user = (req.get("username") or "").strip()
-    pwd = req.get("password") or ""
-    cfg_user = os.environ.get("BROKER_USERNAME", "broker")
-    cfg_pwd = os.environ.get("BROKER_PASSWORD", "")
-    token = _broker_token()
-    if not cfg_pwd or not token:
-        raise HTTPException(status_code=503, detail="Broker login is not configured")
-    ok = hmac.compare_digest(user, cfg_user) & hmac.compare_digest(pwd, cfg_pwd)
-    if not ok:
-        raise HTTPException(status_code=401, detail="Wrong username or password")
-    return {"token": token}
 
 
 @app.get("/broker/pipeline", response_class=HTMLResponse)
@@ -1769,7 +1753,7 @@ loadPipe();
 
 
 @app.get("/broker/leads")
-async def broker_leads(token: str, status: str = "all"):
+async def broker_leads(token: str = "", status: str = "all"):
     """All leads for the dashboard (newest first). status: all|new|contacted|visit|converted."""
     _check_broker_token(token)
     try:
@@ -1780,7 +1764,7 @@ async def broker_leads(token: str, status: str = "all"):
 
 
 class LeadStatusUpdate(BaseModel):
-    token: str
+    token: str = ""
     status: str
     notes: str | None = None
 
@@ -1808,7 +1792,8 @@ async def broker_update_lead(lead_id: str, req: LeadStatusUpdate):
                 from agent.broker_confirmation import _STAGE_LABELS, stage_change_nudge
                 nm = lead.get("name") or "A lead"
                 label = _STAGE_LABELS.get(req.status, req.status)
-                bph = os.environ.get("BROKER_WHATSAPP_PHONE") or os.environ.get("WHATSAPP_BROKER_PHONE")
+                actor = current_staff.get()
+                bph = actor.phone if actor and actor.role == "broker" else (os.environ.get("BROKER_WHATSAPP_PHONE") or os.environ.get("WHATSAPP_BROKER_PHONE"))
                 if bph:
                     _send(bph, f"Got it — *{nm}* is now in *{label}*.")
                 # Parity with the WhatsApp move: nudge the customer on engagement stages.
@@ -1822,7 +1807,7 @@ async def broker_update_lead(lead_id: str, req: LeadStatusUpdate):
 
 
 class LeadOffer(BaseModel):
-    token: str
+    token: str = ""
     broker_offer: str | None = None
     customer_offer: str | None = None
 
@@ -1849,7 +1834,7 @@ async def broker_update_offer(lead_id: str, req: LeadOffer):
 
 
 class PropertySold(BaseModel):
-    token: str
+    token: str = ""
 
 
 @app.post("/broker/properties/{property_id}/sold")
@@ -1916,7 +1901,7 @@ loadDash();
 # ── Broker: add a single property + upload images & documents ────────────────
 
 class NewProperty(BaseModel):
-    token: str
+    token: str = ""
     property_type: str
     bhk: int | None = None
     price_inr: int
@@ -1935,14 +1920,17 @@ async def broker_add_property(req: NewProperty):
     """Add ONE property via the broker form (normalize → geocode → enrich → embed → store)."""
     _check_broker_token(req.token)
     fields = req.model_dump(exclude={"token"})
-    result = create_property_from_fields(fields, broker_id=req.broker_name or "broker_ui")
+    principal = current_staff.get()
+    if principal.role == "broker":
+        fields["broker_name"], fields["broker_phone"] = principal.name, principal.phone
+    result = create_property_from_fields(fields, broker_id=actor_broker_id())
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "Could not add property"))
     return result
 
 
 @app.post("/broker/properties/{property_id}/documents")
-async def broker_upload_document(property_id: str, token: str = Form(...),
+async def broker_upload_document(property_id: str, token: str = Form(""),
                                  label: str = Form("Document"), file: UploadFile = File(...)):
     """Attach a document (PDF/image) — floor plan, brochure, papers — to a property."""
     _check_broker_token(token)
@@ -2085,17 +2073,19 @@ async function doImport(){
 # ── Broker: my listings (view + edit price + availability) ───────────────────
 
 @app.get("/broker/properties")
-async def broker_list_properties(token: str, broker: str | None = None):
+async def broker_list_properties(token: str = "", broker: str | None = None):
     _check_broker_token(token)
     try:
-        return {"properties": list_properties(broker_id=broker)}
+        principal = current_staff.get()
+        selected = principal.broker_id if principal.role == "broker" else broker
+        return {"properties": list_properties(broker_id=selected)}
     except Exception as e:
         logger.error(f"broker_list_properties error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 class PropertyUpdate(BaseModel):
-    token: str
+    token: str = ""
     price_inr: int | None = None
     status: str | None = None       # available | booked | sold | unavailable
     area_name: str | None = None
@@ -2141,7 +2131,7 @@ async def broker_update_property(property_id: str, req: PropertyUpdate):
 
 
 class PropertyDeleteReq(BaseModel):
-    token: str
+    token: str = ""
 
 
 @app.delete("/broker/properties/{property_id}")
@@ -2276,7 +2266,7 @@ load();
 # ── Visit reminders (call daily from a free cron / n8n / Railway scheduler) ──
 
 @app.post("/cron/send-reminders")
-async def cron_send_reminders(token: str, hours_ahead: int = 24):
+async def cron_send_reminders(token: str = "", hours_ahead: int = 24):
     _check_broker_token(token)
     from notifications.reminders import send_due_reminders
     return send_due_reminders(hours_ahead=hours_ahead)
@@ -2285,7 +2275,7 @@ async def cron_send_reminders(token: str, hours_ahead: int = 24):
 # ── Broker: analytics ────────────────────────────────────────────────────────
 
 @app.get("/broker/analytics")
-async def broker_analytics(token: str):
+async def broker_analytics(token: str = ""):
     _check_broker_token(token)
     from datetime import datetime, timezone, timedelta
     from collections import Counter
@@ -2362,7 +2352,7 @@ loadAnalytics();
 
 
 @app.get("/api/broker/analytics/charts")
-async def broker_analytics_charts(token: str):
+async def broker_analytics_charts(token: str = ""):
     """Rich analytics data for the visual dashboard."""
     _check_broker_token(token)
     from database.supabase_client import get_client
@@ -2699,7 +2689,7 @@ _TELEGRAM_APP = None
 _TELEGRAM_APP_LOCK = asyncio.Lock()
 
 
-async def _get_telegram_app(token: str):
+async def _get_telegram_app(token: str = ""):
     global _TELEGRAM_APP
     if _TELEGRAM_APP is not None:
         return _TELEGRAM_APP

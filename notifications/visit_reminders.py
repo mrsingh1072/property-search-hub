@@ -63,12 +63,16 @@ def run_visit_reminders() -> dict:
         logger.debug(f"reminders: get_upcoming_meetings failed: {e}")
         return {"sent": 0}
 
-    bph = os.environ.get("BROKER_WHATSAPP_PHONE") or os.environ.get("WHATSAPP_BROKER_PHONE")
+    default_broker_phone = os.environ.get("BROKER_WHATSAPP_PHONE") or os.environ.get("WHATSAPP_BROKER_PHONE")
     count = 0
     with _LOCK:
         sent = set(_load())
         changed = False
         for m in meetings:
+            bph = default_broker_phone
+            assigned_broker = m.get("brokers") or {}
+            if m.get("broker_id"):
+                bph = assigned_broker.get("phone") if assigned_broker.get("approval_status") == "approved" and assigned_broker.get("is_active") else None
             if (m.get("status") or "").lower() == "cancelled":
                 continue
             raw = m.get("scheduled_at")

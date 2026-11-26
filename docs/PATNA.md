@@ -32,14 +32,16 @@ inventory files, and templates for your own real records.
 1. Connect your own Supabase project and AI provider as described in [SETUP.md](SETUP.md).
 2. For a new database run `supabase/setup.sql`. If migrations 001–005 were already
    applied, run only `supabase/migrations/006_patna_defaults.sql`. It changes future
-   defaults, not existing property or lead rows. No remote migration was applied
+   defaults, not existing property or lead rows. Also apply migration 007 for
+   individual broker accounts if it is not installed. No remote migration was applied
    automatically by this local change.
 3. Copy `examples/patna-listings-template.csv` and add genuine listing rows.
    `property_type`, `price_inr` and `address` are required; `bhk`, `city`,
    `area_sqft`, `furnishing`, `amenities` and broker details are optional.
    Fill `city` with `Patna` or leave it blank to use Patna. Prices are full rupees,
    not lakh/crore units. Put comma-separated amenities inside CSV quotes.
-4. Use `/broker/login` → CSV import or Add property. Broker uploads validate,
+4. Apply at `/broker/apply` and obtain admin approval first ([broker guide](BROKERS.md)).
+   Then use `/broker/login` → CSV import or Add property. Broker uploads validate,
    geocode, embed and write directly to Supabase. You do not need to copy uploaded
    rows into the local JSON batch file.
 5. Verify the uploaded listing in `/properties/browse` and try a search such as

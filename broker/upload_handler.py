@@ -238,6 +238,10 @@ def process_csv(filepath: str, broker_id: str | None = None) -> dict:
     Full pipeline: CSV file → validate → normalize → enrich → embed → Supabase.
     Returns a summary dict.
     """
+    from database.staff_scope import current_staff
+    principal = current_staff.get()
+    if principal and principal.role == "broker":
+        broker_id = principal.broker_id
     path = Path(filepath)
     if not path.exists():
         raise FileNotFoundError(f"CSV file not found: {filepath}")
@@ -262,6 +266,8 @@ def process_csv(filepath: str, broker_id: str | None = None) -> dict:
 
         try:
             # Normalize
+            if principal and principal.role == "broker":
+                row = {**row, "broker_name": principal.name, "broker_phone": principal.phone}
             prop = normalize_row(row, broker_id)
             logger.info(f"[{i}/{len(rows)}] Processing {prop['doc_id']}")
 

@@ -15,7 +15,7 @@ class BrokerConfirmationTests(unittest.TestCase):
             patch("agent.broker_confirmation._property_label", return_value="Test property"),
             patch("agent.broker_confirmation._day_schedule_note", return_value=""),
             patch("agent.broker_confirmation.remember_broker_notification"),
-            patch("database.supabase_client.get_broker_by_phone", return_value={}),
+            patch("database.supabase_client.get_broker_by_phone", return_value={"id": "test-broker", "name": "Test broker", "phone": "9876500000", "approval_status": "approved", "is_active": True}),
             patch("database.supabase_client.get_session", return_value={}),
             patch("notifications.calendar_client.add_event_to_broker_calendar", return_value=None),
             patch("notifications.sms_notifier.send_visit_sms_buyer", return_value=False),

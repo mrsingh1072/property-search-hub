@@ -20,8 +20,10 @@ def configuration_status():
                 and url.hostname != "your-project.supabase.co"
                 and configured("SUPABASE_SERVICE_ROLE_KEY"))
     ai = any(configured(n) for n in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY"))
-    secrets_ok = all(len(os.environ.get(n, "")) >= 32 for n in
-                     ("JWT_SECRET", "BROKER_TOKEN", "BROKER_PASSWORD"))
+    secrets_ok = (len(os.environ.get("JWT_SECRET", "")) >= 32
+                  and len(os.environ.get("ADMIN_SESSION_SECRET", "")) >= 32
+                  and len(os.environ.get("ADMIN_PASSWORD", "")) >= 12
+                  and bool(os.environ.get("ADMIN_USERNAME", "").strip()))
     required = {"database": bool(database), "ai_provider": ai, "local_secrets": secrets_ok}
     groups = {
         "email": ("GMAIL_ADDRESS", "GMAIL_APP_PASSWORD"),
