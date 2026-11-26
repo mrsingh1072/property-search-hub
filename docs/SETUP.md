@@ -32,7 +32,7 @@ operations; an anon/publishable key is insufficient for this backend.
 See [Supabase API key documentation](https://supabase.com/docs/guides/api/api-keys).
 
 For a new project, open `supabase/setup.sql`, copy its contents into Supabase's
-SQL Editor, and click Run. It bundles all seven migrations. No credentials belong
+SQL Editor, and click Run. It bundles all eight migrations. No credentials belong
 in that SQL file. Alternatively, run these individual files in this exact order
 (use one approach, not both):
 
@@ -43,8 +43,9 @@ in that SQL file. Alternatively, run these individual files in this exact order
 5. `supabase/migrations/005_server_access.sql`
 6. `supabase/migrations/006_patna_defaults.sql`
 7. `supabase/migrations/007_verified_broker_accounts.sql`
+8. `supabase/migrations/008_customer_property_transactions.sql`
 
-If 001–006 are already installed, run only 007. This adds broker accounts,
+If 001–007 are already installed, run only 008. If 007 is missing, run 007 before 008. Migration 007 adds broker accounts,
 review history and listing ownership; existing profiles are not auto-approved.
 
 This creates pgvector search, listings, brokers, sessions, leads, meetings,
@@ -155,7 +156,7 @@ Telegram webhook for the same bot at the same time.
 
 - **Chat says credentials are missing:** fill the required values and restart.
 - **401 from a provider:** check the key in its account dashboard; do not log it.
-- **Unknown table / column / RPC:** run all seven migrations in order.
+- **Unknown table / column / RPC:** run all eight migrations in order.
 - **No homes found:** load embeddings and check that listings are available.
 - **OTP request fails:** configure Gmail app password and inspect local logs.
 - **Broker login unavailable:** run migration 007, apply for an account, and approve it from the admin console.
@@ -167,3 +168,13 @@ Telegram webhook for the same bot at the same time.
 Run one server worker. OTPs and deduplication use process memory; reminders and
 broker reply context use `runtime/`. Multiple workers require shared storage and
 coordination before deployment. See [deployment notes](DEPLOY.md).
+
+My Properties is `/my-properties`. Run migration 008 to enable completed purchase
+and rental records. See [BROKERS.md](BROKERS.md) for recording a completed deal.
+
+Saved homes opens at `/saved`, separately from Chat and My Properties. Account
+favourites persist in Supabase; guest shortlists stay scoped to the browser guest
+session. On sign-in, only the current guest shortlist is merged into that account.
+Search, availability filtering, price sorting and remove/undo operate on real
+saved listings. Sold, rented or booked homes are labelled appropriately. This page
+needs no additional migration beyond the existing database setup.

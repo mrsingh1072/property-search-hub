@@ -76,6 +76,8 @@ const sendBtn={disabled:false},location={search:''};
 const calls=[];
 async function refreshAuthUI(){await Promise.resolve();CUST={id:'prajwal',name:'Prajwal'};calls.push('auth');}
 function initGoogle(){}
+async function openMine(){calls.push('mine');}
+async function openShortlist(){calls.push('saved');}
 async function sendSilent(message){assert.equal(CUST.name,'Prajwal');assert.notEqual(SID,'old-shared-session');calls.push('greeting');}
 '''+select+'\n'+bootstrap+r'''
 (async()=>{
@@ -84,6 +86,8 @@ async function sendSilent(message){assert.equal(CUST.name,'Prajwal');assert.notE
  CUST={id:'saurabh'};selectChatSession();const saurabh=SID;assert.notEqual(prajwal,saurabh);
  CUST=null;selectChatSession();assert.notEqual(SID,prajwal);assert.notEqual(SID,saurabh);
  CUST={id:'prajwal'};selectChatSession();assert.equal(SID,prajwal);
+ calls.length=0;location.search='?view=mine';await boot();assert.deepEqual(calls,['auth','greeting','mine']);
+ calls.length=0;location.search='?view=saved';await boot();assert.deepEqual(calls,['auth','greeting','saved']);
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''
         result=subprocess.run([shutil.which('node')],input=harness,text=True,encoding='utf-8',capture_output=True)

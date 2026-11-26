@@ -91,6 +91,28 @@ broker's inventory. The legacy `scripts/fix_broker.py` only prints this workflow
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
-Database verification checks eight tables and the property-search RPC without
+Database verification checks nine tables and the property-search RPC without
 sending notifications. Automated broker tests use isolated fake accounts and
 database adapters; they do not create public listings or contact real people.
+
+## Record a completed purchase or rental
+
+Run `supabase/migrations/008_customer_property_transactions.sql` after 007.
+In My Listings, choose **Record purchase/rental** for the broker's own property.
+Enter the customer's exact ApnaGhar sign-in email, purchase or rental type and
+completion date. Confirm only after the agreement is complete and the customer's
+identity/email have been checked. The customer must already have an account.
+
+The server checks ownership and broker approval. An atomic database operation
+records the account-linked transaction and marks the listing sold or rented.
+Retries of the same completion return the existing record. It does not process
+payments, create agreements or approve property submissions.
+
+The customer sees the home at `/my-properties`; an empty account sees a Browse
+button. Favourites stay in Saved. Visits, saved listings, won pipeline stages and
+manually changing listing status do not automatically become completed purchases.
+Existing deals require deliberate recording; no historical purchases are invented.
+A public listing snapshot is retained if the listing is deleted later. Asset URLs
+may stop working after their files are removed; the record still shows its details.
+Transactions cannot be edited by customers. Contact the administrator to correct
+an erroneous record; cancellation/refund workflows are outside this feature.

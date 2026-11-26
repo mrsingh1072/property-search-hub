@@ -25,7 +25,7 @@ def main(argv=None):
         client = get_client()
         tables = {
             'properties': 'id,embedding,broker_id', 'brokers': 'id,auth_user_id,approval_status', 'leads': 'id,broker_offer,customer_offer',
-            'sessions': 'session_id', 'meetings': 'id', 'customers': 'id', 'broker_confirmations': 'id', 'broker_reviews': 'id',
+            'sessions': 'session_id', 'meetings': 'id', 'customers': 'id', 'broker_confirmations': 'id', 'broker_reviews': 'id', 'property_transactions': 'id,customer_id,transaction_type',
         }
         for table, columns in tables.items():
             client.table(table).select(columns).limit(1).execute()
@@ -33,7 +33,7 @@ def main(argv=None):
         client.rpc('match_properties', {'query_embedding': [0.0] * 384, 'match_count': 1}).execute()
         print('OK property search RPC')
     except Exception as exc:
-        print(f'FAIL database: {type(exc).__name__}. Check credentials and all seven migrations.')
+        print(f'FAIL database: {type(exc).__name__}. Check credentials and all eight migrations.')
         passed = False
     if not args.database_only:
         try:

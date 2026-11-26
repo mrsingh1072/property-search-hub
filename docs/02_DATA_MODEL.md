@@ -8,6 +8,7 @@ missing migrations in sequence.
 | --- | --- |
 | properties | Normalized listing JSON, 384-dimensional embedding, metadata and status |
 | brokers | Auth user ID, contact details, locality coverage and approval state |
+| property_transactions | Customer-linked completed purchase/rental records and listing snapshots |
 | broker_reviews | Admin approval, rejection and suspension audit history |
 | sessions | Conversation messages, requirements and stage |
 | leads | Buyer requirements, contact information, pipeline state and offer notes |
@@ -40,3 +41,8 @@ Broker passwords are managed by Supabase Auth; public tables contain no password
 Broker access requires both `approval_status = approved` and `is_active = true`.
 The admin username/password/signing secret exist only in server environment settings.
 Only the server service role may execute the atomic broker review function.
+
+Migration 008 records completed purchases/rentals separately from favourites, visits
+and lead stages. The service-only completion RPC checks broker ownership and
+updates listing availability in the same transaction. Customer reads filter by
+the verified account UUID, not a browser-supplied email, phone or customer ID.

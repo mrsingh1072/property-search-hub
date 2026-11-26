@@ -15,7 +15,9 @@ Gemini/Groq/OpenRouter · HTML/CSS/JavaScript.
 
 - Natural-language property search with local 384-dimensional embeddings,
   metadata filters, hybrid retrieval and ranking.
-- Browser chat, property cards, browse filters and saved favourites.
+- Browser chat, property cards and browse filters.
+- Dedicated Saved homes page with availability, search, price sorting and remove/undo.
+- Separate My Properties page for completed purchases and rentals linked to an account.
 - Buyer requirement collection and lead capture.
 - Individual broker accounts verified by ApnaGhar admin; isolated listings, leads and visits.
 - Broker dashboard, lead pipeline, offer notes, analytics and CSV imports.
@@ -38,7 +40,7 @@ python -m venv .venv
 
 Open `.env` and add `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and at least one
 of `GEMINI_API_KEY`, `GROQ_API_KEY`, or `OPENROUTER_API_KEY`.
-Run the seven SQL migrations listed in [the setup guide](docs/SETUP.md), then:
+Run the eight SQL migrations listed in [the setup guide](docs/SETUP.md), then:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/check_config.py
@@ -56,6 +58,8 @@ configuration until database and AI settings are present.
 | Home | http://127.0.0.1:8000/ |
 | Chat | http://127.0.0.1:8000/chat |
 | Listings | http://127.0.0.1:8000/properties/browse |
+| Saved homes | http://127.0.0.1:8000/saved |
+| My Properties | http://127.0.0.1:8000/my-properties |
 | Broker application | http://127.0.0.1:8000/broker/apply |
 | Admin login | http://127.0.0.1:8000/admin/login |
 | Broker login | http://127.0.0.1:8000/broker/login |

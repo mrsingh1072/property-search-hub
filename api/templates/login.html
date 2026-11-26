@@ -78,6 +78,7 @@ input:focus{border-color:var(--emerald);background:#fff;box-shadow:0 0 0 3px rgb
   </div>
 </div>
 
+<script src="/static/saved-store.js"></script>
 <script>
 var NEXT=new URLSearchParams(location.search).get('next')||'/chat';
 if(!NEXT.startsWith('/')||NEXT.startsWith('//')||NEXT.includes('\\'))NEXT='/chat';
@@ -85,13 +86,8 @@ if(!NEXT.startsWith('/')||NEXT.startsWith('//')||NEXT.includes('\\'))NEXT='/chat
 function authHeaders(t){return t?{'Authorization':'Bearer '+t}:{};}
 async function onLoggedIn(token){
   localStorage.setItem('riya_token',token);
-  // carry over anything saved locally before signing in
-  try{
-    var ids=JSON.parse(localStorage.getItem('riya_saved')||'[]');
-    for(var i=0;i<ids.length;i++){
-      await fetch('/me/favourites',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},authHeaders(token)),body:JSON.stringify({property_id:ids[i]})});
-    }
-  }catch(e){}
+  // Only this browser's guest shortlist is merged; other accounts stay separate.
+  try{await window.ApnaGharSaved.mergeGuest(token);}catch(error){}
   location.replace(NEXT);
 }
 

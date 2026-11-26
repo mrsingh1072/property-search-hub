@@ -567,6 +567,7 @@ def process_message(session_id: str, user_message: str, platform: str = "web",
     """
     conv = ConversationManager(session_id, platform)
     conv.load()
+    conv.authenticated_customer_id = str(customer_profile["id"]) if platform == "web" and customer_profile else None
 
     # Authenticated web identity comes from the verified account, never a browser name.
     if platform == "web" and customer_profile:
@@ -585,6 +586,8 @@ def process_message(session_id: str, user_message: str, platform: str = "web",
             profile["phone"] = customer_profile["phone"]
         profile["onboarding_step"] = "complete"
         conv.requirements["_profile"] = profile
+        if "favourites" in customer_profile:
+            conv.requirements["_shortlist"] = list(customer_profile.get("favourites") or [])
 
     # On messaging platforms we don't run the web name/phone onboarding, but we DO get
     # the sender's name for free from the platform — store it so ApnaGhar can use it.
@@ -1910,6 +1913,13 @@ def _handle_save_favourite(conv: ConversationManager, user_message: str, user_na
         return (f"{_card_desc(card)} is already in your favourites{nm}! ❤️ "
                 f"You have {len(sl)} saved — say *show favourites* to see them.")
     sl.append(pid)
+    customer_id = getattr(conv, "authenticated_customer_id", None)
+    if customer_id:
+        try:
+            from api.auth import set_customer_favourites
+            set_customer_favourites(customer_id, sl)
+        except Exception:
+            return "I couldn't save that home just now. Please try the heart button again in a moment."
     conv.requirements["_shortlist"] = sl
     return (f"Saved {_card_desc(card)} to your favourites{nm}! ❤️ You now have {len(sl)} saved. "
             f"Say *show favourites* anytime, or tell me when you'd like to visit one.")

@@ -32,7 +32,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response, RedirectResponse
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager, suppress
 
@@ -238,10 +238,10 @@ async def get_shortlist(session_id: str):
         if not result.data:
             return {"count": 0, "properties": []}
 
-        cards = [
-            to_card({"id": r["id"], "data": r["data"], "score": 0, "similarity": 1.0})
-            for r in result.data
-        ]
+        by_id = {row["id"]: row for row in result.data}
+        cards = [{**to_card({"id": row["id"], "data": row["data"], "score": 0, "similarity": 1.0}),
+                  "status": row.get("status") or "unavailable"}
+                 for property_id in reversed(shortlist) if (row := by_id.get(property_id))]
         return {"count": len(cards), "properties": cards}
     except Exception as e:
         logger.error(f"Shortlist fetch error: {e}")
@@ -344,37 +344,64 @@ async def remove_favourite(req: FavReq, authorization: str = Header(default=""))
     return {"ok": True, "count": len(favs)}
 
 
-@app.get("/me/properties")
-async def my_properties(authorization: str = Header(default="")):
-    """Everything this customer liked + their booked visits (for the My Properties page)."""
+@app.get("/me/favourites")
+async def customer_favourites(authorization: str = Header(default="")):
     cust = _current_customer(authorization)
     if not cust:
-        raise HTTPException(status_code=401, detail="Not logged in")
+        raise HTTPException(401, "Not logged in")
     from rag.retriever import to_card
     from database.supabase_client import get_client
-    c = get_client()
+    ids = cust.get("favourites") or []
+    rows = get_client().table("properties").select("*").in_("id", ids).eq("city", CITY).execute().data if ids else []
+    by_id = {row["id"]: row for row in rows or []}
+    cards = [{**to_card({"id": row["id"], "data": row["data"], "score": 0, "similarity": 1.0}),
+              "status": row.get("status") or "unavailable"}
+             for property_id in reversed(ids) if (row := by_id.get(property_id))]
+    return {"properties": cards}
 
-    favs = cust.get("favourites") or []
-    cards = []
-    if favs:
-        rows = c.table("properties").select("*").in_("id", favs).eq("city", CITY).execute().data or []
-        cards = [to_card({"id": r["id"], "data": r["data"], "score": 0, "similarity": 1.0}) for r in rows]
 
-    visits = []
-    phone = cust.get("phone")
-    if phone:
-        digits = "".join(ch for ch in phone if ch.isdigit())[-10:]
-        # Exact 10-digit match — a substring (ilike %digits%) could surface another
-        # customer's visits whose number merely contains these digits (IDOR).
-        leads = c.table("leads").select("id").eq("phone", digits).execute().data or []
-        lead_ids = [l["id"] for l in leads]
-        if lead_ids:
-            mts = (c.table("meetings").select("*").in_("lead_id", lead_ids)
-                   .neq("status", "cancelled").order("scheduled_at").execute().data) or []
-            visits = [{"scheduled_at": m.get("scheduled_at"), "status": m.get("status"),
-                       "property_id": m.get("property_id")} for m in mts]
+@app.get("/me/properties")
+async def my_properties(authorization: str = Header(default="")):
+    """Only completed transactions explicitly linked to the authenticated customer."""
+    cust = _current_customer(authorization)
+    if not cust:
+        raise HTTPException(401, "Not logged in")
+    from database.supabase_client import get_client
+    try:
+        rows = (get_client().table("property_transactions")
+                .select("id,transaction_type,completed_on,property_snapshot")
+                .eq("customer_id", str(cust["id"])).order("completed_on", desc=True).execute().data or [])
+    except Exception:
+        raise HTTPException(503, "My Properties setup is incomplete or unavailable. Ask admin to check migration 008.")
+    return {"properties": rows}
 
-    return {"name": cust.get("name"), "email": cust["email"], "favourites": cards, "visits": visits}
+
+@app.get("/saved", response_class=HTMLResponse)
+async def saved_properties_page():
+    return HTMLResponse((_TEMPLATES_DIR / "saved.html").read_text(encoding="utf-8"))
+
+
+@app.get("/static/saved.js")
+async def saved_properties_script():
+    return Response((Path(__file__).parent / "static" / "saved.js").read_text(encoding="utf-8"),
+                    media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/static/saved-store.js")
+async def saved_store_script():
+    return Response((Path(__file__).parent / "static" / "saved_store.js").read_text(encoding="utf-8"),
+                    media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/my-properties", response_class=HTMLResponse)
+async def customer_properties_page():
+    return HTMLResponse((_TEMPLATES_DIR / "my_properties.html").read_text(encoding="utf-8"))
+
+
+@app.get("/static/my-properties.js")
+async def customer_properties_script():
+    return Response((Path(__file__).parent / "static" / "my_properties.js").read_text(encoding="utf-8"),
+                    media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
 
 # ── Broker upload endpoint ────────────────────────────────────────────────────
@@ -1006,6 +1033,12 @@ loadImgs();
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
+@app.get("/static/customer-nav.js")
+async def customer_navigation_script():
+    return Response((Path(__file__).parent / "static" / "customer_nav.js").read_text(encoding="utf-8"),
+                    media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/static/email-login.js")
 async def email_login_script():
     return Response((Path(__file__).parent / "static" / "email_login.js").read_text(encoding="utf-8"),
@@ -1040,8 +1073,10 @@ async def customer_login_page():
 
 
 @app.get("/chat", response_class=HTMLResponse)
-async def web_chat():
-    """Chat UI."""
+async def web_chat(view: str = ""):
+    """Chat UI; old account-panel links now open their standalone pages."""
+    if view in {"saved", "mine"}:
+        return RedirectResponse("/saved" if view == "saved" else "/my-properties", status_code=303)
     tmpl = _TEMPLATES_DIR / "chat.html"
     if tmpl.exists():
         return HTMLResponse(tmpl.read_text(encoding="utf-8"))
@@ -2180,7 +2215,7 @@ async def broker_edit_page(property_id: str):
 <select id="e-furn" class="input"><option>Furnished</option><option>Semi-Furnished</option><option>Unfurnished</option></select></div></div>
 <label class="field-label">Amenities (comma-separated)</label><input id="e-amen" class="input">
 <label class="field-label">Status</label>
-<select id="e-status" class="input"><option value="available">Available</option><option value="booked">Booked</option><option value="sold">Sold</option><option value="unavailable">Unavailable</option></select>
+<select id="e-status" class="input"><option value="available">Available</option><option value="booked">Booked</option><option value="sold">Sold</option><option value="rented">Rented</option><option value="unavailable">Unavailable</option></select>
 <label class="field-label">Description</label><textarea id="e-desc" class="input" style="height:80px"></textarea>
 <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
 <button class="btn btn-primary" onclick="save()">Save Changes</button>
@@ -2233,13 +2268,62 @@ loadProp();
         hdr_extra=f'<a href="/broker/images/{pid}" class="btn btn-ghost" style="font-size:12px;padding:7px 14px"><i class="ph ph-camera"></i> Photos</a>')
 
 
+class PropertyCompletion(BaseModel):
+    customer_email: str = Field(min_length=5, max_length=254)
+    transaction_type: str
+    completed_on: str = Field(min_length=10, max_length=10)
+
+
+@app.get("/broker/properties/{property_id}/complete", response_class=HTMLResponse)
+async def broker_completion_page(property_id: str):
+    content = (_TEMPLATES_DIR / "broker_completion.html").read_text(encoding="utf-8")
+    return HTMLResponse(_broker_page("Record purchase or rental", content, active="LIST"))
+
+
+@app.post("/broker/properties/{property_id}/completion")
+async def broker_complete_property(property_id: str, req: PropertyCompletion):
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+    from api.auth import normalize_email
+    from api.staff_auth import service_client
+    from database.supabase_client import get_client
+    email = normalize_email(req.customer_email)
+    try:
+        completed_on = date.fromisoformat(req.completed_on)
+    except ValueError:
+        raise HTTPException(400, "Choose a valid completion date")
+    if not email or req.transaction_type not in {"purchase", "rent"} or completed_on > datetime.now(ZoneInfo("Asia/Kolkata")).date():
+        raise HTTPException(400, "Enter a valid customer email, completion date, and purchase or rental type")
+    principal = current_staff.get()
+    props = get_client().table("properties").select("id,broker_id,city").eq("id", property_id).limit(1).execute().data or []
+    if not props or props[0].get("city") != CITY:
+        raise HTTPException(404, "Listing not found")
+    owner = props[0].get("broker_id")
+    if principal.role == "broker" and owner != principal.broker_id:
+        raise HTTPException(404, "Listing not found")
+    accounts = service_client().table("customers").select("id").eq("email", email).limit(1).execute().data or []
+    if not accounts:
+        raise HTTPException(400, "The customer must sign in to ApnaGhar with this email before you record the completion")
+    try:
+        service_client().rpc("record_property_transaction", {
+            "p_property_id": property_id, "p_customer_id": accounts[0]["id"], "p_broker_id": owner,
+            "p_transaction_type": req.transaction_type, "p_completed_on": completed_on.isoformat(),
+            "p_recorded_by": principal.user_id or principal.name,
+        }).execute()
+    except Exception as exc:
+        if getattr(exc, "code", None) in {"P0001", "23505"}:
+            raise HTTPException(409, "This listing is unavailable or already has a completed transaction. Check its records before retrying.")
+        raise HTTPException(503, "Could not record completion. Ask admin to check migration 008 and try again.")
+    return {"ok": True}
+
+
 @app.get("/broker/listings", response_class=HTMLResponse)
 async def broker_listings_page():
     content = """
 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
   <select id="f-status" class="input" style="width:140px" onchange="load()">
     <option value="available">Available</option><option value="booked">Booked</option>
-    <option value="sold">Sold</option><option value="">All</option>
+    <option value="sold">Sold</option><option value="rented">Rented</option><option value="">All</option>
   </select>
   <input class="input" id="f-area" placeholder="Filter by area…" style="width:180px" oninput="load()">
   <a href="/broker/add" class="btn btn-primary" style="margin-left:auto">+ Add Property</a>
@@ -2267,8 +2351,9 @@ async function load(){
       <td style="text-align:center">${p.images||0} 📷</td>
       <td style="display:flex;gap:6px;flex-wrap:wrap">
         <a href="/broker/edit/${p.id}" class="btn btn-ghost" style="font-size:11px;padding:4px 10px">Edit</a>
+        <a href="/broker/properties/${encodeURIComponent(p.id)}/complete" class="btn btn-primary" style="font-size:11px;padding:4px 10px">Record purchase/rental</a>
         <a href="/broker/images/${p.id}" class="btn btn-ghost" style="font-size:11px;padding:4px 10px">Photos</a>
-        ${p.status!=='sold'?`<button class="btn btn-danger" style="font-size:11px;padding:4px 10px" onclick="markSold('${p.id}')">Sold</button>`:''}
+        ${!['sold','rented'].includes(p.status)?`<button class="btn btn-danger" style="font-size:11px;padding:4px 10px" onclick="markSold('${p.id}')">Sold</button>`:''}
       </td>
     </tr>`).join('')
     +'</tbody></table></div>';
@@ -2562,7 +2647,7 @@ def _broker_edit_html(property_id: str) -> str:
         "<option>Semi-Furnished</option><option>Unfurnished</option></select></div>"
         "</div>"
         "<label>Status</label><select id='status'><option value='available'>Available</option>"
-        "<option value='booked'>Booked</option><option value='sold'>Sold</option>"
+        "<option value='booked'>Booked</option><option value='sold'>Sold</option><option value='rented'>Rented</option>"
         "<option value='unavailable'>Unavailable</option></select>"
         "<label>Description</label><textarea id='desc' placeholder='Update property details...'></textarea>"
         "<label>Amenities (comma-separated)</label><input id='amenities' placeholder='Lift, Parking, Gym'></input>"

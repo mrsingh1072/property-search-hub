@@ -21,6 +21,11 @@ schema is at `/openapi.json`. The application source is `api/main.py`.
 | `POST /auth/otp/verify` | Verify a single-use code and issue JWT | Email/code |
 | `POST /auth/google` | Verify Google Identity credential | Google client configured |
 | `GET /me` | Customer account details | `Authorization: Bearer <JWT>` |
+| `GET /saved` | Standalone saved-home overview | Account favourites or the current browser guest shortlist |
+| `GET /my-properties` | Standalone account page | Customer login required for its data |
+| `GET /me/properties` | Completed purchases/rentals for current customer | Customer JWT |
+| `GET /me/favourites` | Saved listing cards in recent-save order, with live availability | Customer JWT |
+| `POST /broker/properties/{id}/completion` | Record completed purchase/rental | Approved listing broker or admin |
 | `POST /broker/apply` | Submit broker application | Public; creates pending account |
 | `POST /broker/otp/request` | Send broker email code | Approved active account; SMTP required |
 | `POST /broker/otp/verify` | Verify code and issue broker session | Approved active account |
