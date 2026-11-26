@@ -268,8 +268,14 @@ body{font-family:'General Sans',system-ui,sans-serif;background:var(--paper);hei
 
 <script>
 // ── Session ──────────────────────────────────────────────────────────────────
-let SID = localStorage.getItem('apnaghar_patna_sid');
-if (!SID) { SID = 'web_patna_' + crypto.randomUUID(); localStorage.setItem('apnaghar_patna_sid', SID); }
+let SID = null;
+function selectChatSession(){
+  const owner=CUST ? String(CUST.id || CUST.email) : 'guest';
+  const key='apnaghar_patna_sid:'+owner;
+  SID=localStorage.getItem(key);
+  if(!SID){SID='web_patna_'+crypto.randomUUID();localStorage.setItem(key,SID);}
+}
+
 
 const feed = document.getElementById('feed');
 const inp  = document.getElementById('inp');
@@ -306,7 +312,11 @@ if (SR) {
 function resetMic(){ micBtn.innerHTML='<i class="ph ph-microphone"></i>'; micBtn.classList.remove('listening'); micBtn.disabled=false; }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  sendBtn.disabled=true;
+  await refreshAuthUI();
+  selectChatSession();
+  initGoogle();
   const params = new URLSearchParams(location.search);
   const propId = params.get('prop');
   const area = params.get('area');
@@ -315,16 +325,17 @@ window.addEventListener('load', () => {
   if (propId) {
     // User came from browse page — init ApnaGhar with property context
     const ctx = `__init_prop__:${propId}:${bhk} BHK in ${area} at ${price}`;
-    sendSilent(ctx);
+    await sendSilent(ctx);
   } else {
-    sendSilent('__init__');
+    await sendSilent('__init__');
   }
+  sendBtn.disabled=false;
 });
 
 async function sendSilent(msg) {
   const typing = addTyping();
   try {
-    const res = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'},
+    const res = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json',...authHeaders()},
       body: JSON.stringify({session_id:SID, message:msg, platform:'web'}) });
     const data = await res.json();
     typing.remove();
@@ -334,12 +345,12 @@ async function sendSilent(msg) {
 }
 
 async function send() {
-  const txt = inp.value.trim(); if (!txt || sendBtn.disabled) return;
+  const txt = inp.value.trim(); if (!txt || sendBtn.disabled || !SID) return;
   inp.value = ''; sendBtn.disabled = true;
   const userRow = addBubble(txt, 'user');
   const typing = addTyping();
   try {
-    const res = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'},
+    const res = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json',...authHeaders()},
       body: JSON.stringify({session_id:SID, message:txt, platform:'web'}) });
     const data = await res.json();
     typing.remove();
@@ -511,7 +522,7 @@ async function refreshAuthUI(){
     CUST=await r.json();
     loginBtn.textContent='👤 '+((CUST.name||CUST.email||'Me').split(' ')[0]);
     loginBtn.onclick=openMine; mineBtn.style.display='';
-  }catch(e){ TOKEN=''; localStorage.removeItem('riya_token'); loginBtn.style.display=''; loginBtn.textContent='👤 Login'; loginBtn.onclick=openLogin; mineBtn.style.display='none'; }
+  }catch(e){ CUST=null; TOKEN=''; localStorage.removeItem('riya_token'); loginBtn.style.display=''; loginBtn.textContent='👤 Login'; loginBtn.onclick=openLogin; mineBtn.style.display='none'; }
 }
 function openLogin(){ location.href='/login?next=/chat'; }
 function closeLogin(){ document.getElementById('login-panel').style.display='none'; }
@@ -544,10 +555,11 @@ async function onLoggedIn(token){
   TOKEN=token; localStorage.setItem('riya_token',token); otpSent=false;
   document.getElementById('otp-row').style.display='none'; document.getElementById('login-action').textContent='Send code'; document.getElementById('login-msg').textContent='';
   closeLogin(); await refreshAuthUI();
+  selectChatSession(); feed.replaceChildren(); await sendSilent('__init__');
   for(const id of savedIds){ try{ await fetch('/me/favourites',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({property_id:id})}); }catch(e){} }
   addBubble('You\'re signed in'+(CUST&&CUST.name?', '+CUST.name.split(' ')[0]:'')+'! Your favourites and visits are saved to your account now.', 'riya');
 }
-function logout(){ TOKEN=''; localStorage.removeItem('riya_token'); closeMine(); refreshAuthUI(); }
+function logout(){ TOKEN=''; localStorage.removeItem('riya_token'); CUST=null; location.replace('/chat'); }
 async function initGoogle(){
   try{
     const cfg=await (await fetch('/auth/config')).json();
@@ -581,7 +593,7 @@ async function openMine(){
     }
   }catch(e){ c.innerHTML='<p style="color:#dc2626;font-size:13px">Could not load your properties.</p>'; }
 }
-window.addEventListener('load',()=>{ refreshAuthUI(); initGoogle(); });
+
 
 // ── Lightbox ──────────────────────────────────────────────────────────────────
 function openLb(src){ document.getElementById('lb-img').src=src; document.getElementById('lb').style.display='flex'; }

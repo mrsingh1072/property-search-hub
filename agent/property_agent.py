@@ -552,7 +552,8 @@ def _handle_web_onboarding(conv: ConversationManager, user_message: str) -> dict
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def process_message(session_id: str, user_message: str, platform: str = "web",
-                    display_name: str | None = None, user_phone: str | None = None) -> dict:
+                    display_name: str | None = None, user_phone: str | None = None,
+                    customer_profile: dict | None = None) -> dict:
     """
     Process one user message.
     Returns {"reply": str, "properties": list[dict]}.
@@ -566,6 +567,24 @@ def process_message(session_id: str, user_message: str, platform: str = "web",
     """
     conv = ConversationManager(session_id, platform)
     conv.load()
+
+    # Authenticated web identity comes from the verified account, never a browser name.
+    if platform == "web" and customer_profile:
+        customer_id = str(customer_profile["id"])
+        profile = conv.requirements.get("_profile") or {}
+        if profile.get("customer_id") != customer_id:
+            # Do not carry a guest/previous account's personal details into this account.
+            conv.requirements = {}
+            conv.messages = []
+            conv.set_stage("discovery")
+            profile = {}
+        profile["customer_id"] = customer_id
+        profile["name"] = (customer_profile.get("name") or "").strip() or None
+        profile["email"] = customer_profile.get("email")
+        if customer_profile.get("phone"):
+            profile["phone"] = customer_profile["phone"]
+        profile["onboarding_step"] = "complete"
+        conv.requirements["_profile"] = profile
 
     # On messaging platforms we don't run the web name/phone onboarding, but we DO get
     # the sender's name for free from the platform — store it so ApnaGhar can use it.

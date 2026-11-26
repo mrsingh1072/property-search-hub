@@ -127,17 +127,21 @@ class ChatResponse(BaseModel):
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, authorization: str = Header(default="")):
     """Send a message to the property AI assistant."""
     from scripts.check_config import configuration_status
     status = configuration_status()
     if not status["required"]["database"] or not status["required"]["ai_provider"]:
         raise HTTPException(status_code=503, detail="ApnaGhar needs database and AI credentials. Configure .env using docs/SETUP.md, then restart the server.")
+    customer = await asyncio.to_thread(_current_customer, authorization) if authorization else None
+    if authorization and not customer:
+        raise HTTPException(status_code=401, detail="Please sign in again")
     try:
         result = await asyncio.to_thread(process_message,
             session_id=req.session_id,
             user_message=req.message,
             platform=req.platform,
+            customer_profile=customer,
         )
         reply = result["reply"]
         # Deliver any broker→customer messages queued for this (pull-based) web session.
@@ -312,7 +316,7 @@ async def me(authorization: str = Header(default="")):
     cust = _current_customer(authorization)
     if not cust:
         raise HTTPException(status_code=401, detail="Not logged in")
-    return {"email": cust["email"], "name": cust.get("name"),
+    return {"id": str(cust["id"]), "email": cust["email"], "name": cust.get("name"),
             "phone": cust.get("phone"), "favourites": cust.get("favourites") or []}
 
 
